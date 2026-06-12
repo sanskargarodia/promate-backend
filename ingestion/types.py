@@ -5,6 +5,11 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class RepairStory(BaseModel):
+    title: str
+    content: str
+
+
 class ScrapedPart(BaseModel):
     ps_number: str
     manufacturer_part_number: str | None = None
@@ -17,6 +22,7 @@ class ScrapedPart(BaseModel):
     install_difficulty: str | None = None
     install_time_minutes: int | None = None
     install_instructions: str | None = None
+    repair_stories: list[RepairStory] = Field(default_factory=list)
     video_url: str | None = None
     rating: float | None = None
     rating_count: int | None = None

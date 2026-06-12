@@ -44,8 +44,16 @@ async def check_compatibility(
 async def get_installation_guide(
     session: AsyncSession,
     ps_number: str,
+    *,
+    query: str = "installation repair instructions",
+    limit: int = 3,
 ) -> InstallationGuide | None:
-    return await catalog_svc.get_installation_guide(session, ps_number=ps_number)
+    return await catalog_svc.get_installation_guide(
+        session,
+        ps_number=ps_number,
+        query=query,
+        limit=limit,
+    )
 
 
 async def diagnose_symptom(

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ingestion.parse import parse_part_page
+from ingestion.parse import parse_part_page, part_to_documents
 
 FIXTURE = Path(__file__).parent / "fixtures" / "part_PS11752778.html"
 
@@ -34,3 +34,20 @@ def test_parse_ps11752778(part_html: str) -> None:
     assert part.install_time_minutes == 15
     assert part.video_url is not None
     assert part.description
+    assert part.install_instructions
+    assert len(part.repair_stories) >= 2
+
+
+def test_install_story_documents(part_html: str) -> None:
+    part = parse_part_page(
+        part_html,
+        source_url=(
+            "https://www.partselect.com/PS11752778-Whirlpool-WPW10321304-"
+            "Refrigerator-Door-Shelf-Bin.htm"
+        ),
+    )
+    docs = part_to_documents(part)
+    install_docs = [d for d in docs if d.doc_type == "install_guide"]
+    assert len(install_docs) == len(part.repair_stories)
+    assert len({d.title for d in install_docs}) == len(install_docs)
+    assert all(d.metadata.get("story_index") for d in install_docs)

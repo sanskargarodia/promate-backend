@@ -36,14 +36,29 @@ async def run_agent_turn(
         yield {"type": "token", "content": final}
 
     tool_payload = result.get("tool_payload") or {}
-    parts_raw = tool_payload.get("parts")
+    emitted: set[str] = set()
+
+    primary = tool_payload.get("part")
+    if isinstance(primary, dict):
+        card = PartResult.model_validate(primary)
+        emitted.add(card.ps_number)
+        yield {
+            "type": "product_card",
+            "part": card.model_dump(),
+        }
+
+    parts_raw = tool_payload.get("matching_parts") or tool_payload.get("parts")
     if isinstance(parts_raw, list):
         for item in parts_raw[:3]:
-            if isinstance(item, dict):
-                card = PartResult.model_validate(item)
-                yield {
-                    "type": "product_card",
-                    "part": card.model_dump(),
-                }
+            if not isinstance(item, dict):
+                continue
+            card = PartResult.model_validate(item)
+            if card.ps_number in emitted:
+                continue
+            emitted.add(card.ps_number)
+            yield {
+                "type": "product_card",
+                "part": card.model_dump(),
+            }
 
     yield {"type": "done"}

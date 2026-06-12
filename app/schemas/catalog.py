@@ -41,6 +41,10 @@ class InstallationGuide(BaseModel):
     difficulty: str | None = None
     time_minutes: int | None = None
     video_url: str | None = None
+    stories: list["DocumentChunk"] = Field(
+        default_factory=list,
+        description="Semantically retrieved repair-story chunks for this part.",
+    )
     steps: list[InstallStep] = Field(default_factory=list)
     safety_notice: str = (
         "Unplug the appliance and shut off the water supply before servicing, when applicable."

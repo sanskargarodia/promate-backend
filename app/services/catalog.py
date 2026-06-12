@@ -12,10 +12,11 @@ from app.schemas.catalog import (
     CompatibilityResult,
     DiagnosisCandidate,
     DiagnosisResult,
+    DocumentChunk,
     InstallationGuide,
-    InstallStep,
     PartResult,
 )
+from app.services import retrieval as retrieval_svc
 
 PS_RE = re.compile(r"PS\d+", re.I)
 
@@ -140,57 +141,38 @@ async def check_compatibility(
     )
 
 
-def _steps_from_text(text: str) -> list[InstallStep]:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    if not lines:
-        return []
-    steps: list[InstallStep] = []
-    for idx, line in enumerate(lines, start=1):
-        cleaned = re.sub(r"^\d+[\).\s]+", "", line)
-        steps.append(InstallStep(order=idx, text=cleaned))
-    return steps
-
-
 async def get_installation_guide(
     session: AsyncSession,
     *,
     ps_number: str,
+    query: str = "installation repair instructions",
+    limit: int = 3,
 ) -> InstallationGuide | None:
     ps = ps_number.strip().upper()
     part = await session.get(Part, ps)
     if part is None:
         return None
 
-    doc = await session.scalar(
-        select(Document)
-        .where(
-            Document.part_ps_number == ps,
-            Document.doc_type == "install_guide",
-        )
-        .limit(1)
+    stories = await retrieval_svc.search_documents(
+        session,
+        query=query,
+        doc_type="install_guide",
+        part_ps_number=ps,
+        limit=limit,
     )
 
-    steps: list[InstallStep] = []
-    sources: list[str] = []
-    if doc and doc.content:
-        steps = _steps_from_text(doc.content)
-        if doc.source_url:
-            sources.append(doc.source_url)
-    elif part.install_instructions:
-        steps = _steps_from_text(part.install_instructions)
-        if part.source_url:
-            sources.append(part.source_url)
-
-    if not steps and part.install_difficulty:
-        steps = [
-            InstallStep(
-                order=1,
-                text=(
-                    f"Follow the manufacturer instructions for {part.name}. "
-                    f"Rated {part.install_difficulty}."
-                ),
+    if not stories and part.install_instructions:
+        stories = [
+            DocumentChunk(
+                doc_type="install_guide",
+                title=f"Installation instructions for {ps}",
+                content=part.install_instructions,
+                part_ps_number=ps,
+                source_url=part.source_url,
             )
         ]
+
+    sources = sorted({s.source_url for s in stories if s.source_url})
 
     return InstallationGuide(
         ps_number=ps,
@@ -198,7 +180,7 @@ async def get_installation_guide(
         difficulty=part.install_difficulty,
         time_minutes=part.install_time_minutes,
         video_url=part.video_url,
-        steps=steps,
+        stories=stories,
         sources=sources,
     )
 

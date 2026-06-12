@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import RunnableConfig
 
 from app.agents.state import AgentState, Intent
+from app.core.config import is_llm_configured
 from app.core.llm import get_chat_model, get_guardrail_model
 from app.guardrails.input import run_input_guardrails
 from app.guardrails.output import validate_output
@@ -19,6 +20,11 @@ from app.services import retrieval as retrieval_svc
 
 PS_RE = re.compile(r"\b(PS\d+)\b", re.I)
 MODEL_RE = re.compile(r"\b([A-Z]{2,}\d{3,}[A-Z0-9]*)\b")
+
+_LLM_UNAVAILABLE = (
+    "The assistant needs an Anthropic API key to compose answers from catalog data. "
+    "Add ANTHROPIC_API_KEY to promate-backend/.env and restart the server."
+)
 
 
 def _prompt(name: str, **kwargs: str) -> str:
@@ -81,9 +87,7 @@ def _heuristic_route(text: str) -> dict[str, Any]:
 
 
 async def _llm_route(text: str) -> dict[str, Any] | None:
-    from app.core.config import settings
-
-    if not settings.anthropic_api_key:
+    if not is_llm_configured():
         return None
 
     model = get_guardrail_model()
@@ -152,19 +156,10 @@ async def supervisor_node(state: AgentState, config: RunnableConfig) -> dict[str
 
 async def clarification_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     _ = config
-    intent = state.get("intent")
-    if intent == "compatibility":
-        text = (
-            "To check compatibility I need both the part number (e.g. PS11752778) "
-            "and your appliance model number (e.g. WDT780SAEM1). Which are you looking at?"
-        )
-    elif intent == "installation":
-        text = "Which part number would you like installation steps for? (Example: PS11752778)"
-    else:
-        text = (
-            "I can help with refrigerator and dishwasher parts — could you share a part number "
-            "or describe the symptom and appliance brand?"
-        )
+    text = (
+        "I need a bit more to help — share a PartSelect part number (PS…), "
+        "your appliance model number, or describe what's going wrong."
+    )
     return {"final_response": text, "messages": [AIMessage(content=text)]}
 
 
@@ -178,53 +173,71 @@ def needs_clarification(state: AgentState) -> bool:
 
 
 async def worker_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+    """Gather catalog context from extracted entities — intent-agnostic."""
     session = config["configurable"]["session"]
-    intent = state.get("intent", "product_search")
     text = _last_user_text(state)
-    payload: dict[str, object] = {"intent": intent}
+    ps = state.get("ps_number")
+    model = state.get("model_number")
+
+    payload: dict[str, object] = {}
     allowed: set[str] = set()
 
-    if intent == "product_search":
-        results = await catalog_svc.search_parts(
-            session,
-            query=text,
-            appliance_type=state.get("appliance_type"),
+    parts = await catalog_svc.search_parts(
+        session,
+        query=text,
+        appliance_type=state.get("appliance_type"),
+        limit=8,
+    )
+    if parts:
+        payload["matching_parts"] = [r.model_dump() for r in parts]
+        allowed.update(r.ps_number for r in parts)
+
+    if ps:
+        part = await catalog_svc.get_part(session, ps)
+        if part:
+            payload["part"] = part.model_dump()
+            allowed.add(ps)
+        guide = await catalog_svc.get_installation_guide(
+            session, ps_number=ps, query=text, limit=3
         )
-        payload["parts"] = [r.model_dump() for r in results]
-        allowed.update(r.ps_number for r in results)
-
-    elif intent == "compatibility":
-        ps = state.get("ps_number") or ""
-        model = state.get("model_number") or ""
-        result = await catalog_svc.check_compatibility(session, ps_number=ps, model_number=model)
-        payload["compatibility"] = result.model_dump()
-        allowed.add(result.ps_number)
-
-    elif intent == "installation":
-        ps = state.get("ps_number") or ""
-        guide = await catalog_svc.get_installation_guide(session, ps_number=ps)
         if guide:
             payload["installation"] = guide.model_dump()
             allowed.add(guide.ps_number)
-        docs = await retrieval_svc.search_documents(
-            session, query=text, doc_type="install_guide", part_ps_number=ps, limit=3
-        )
-        payload["documents"] = [d.model_dump() for d in docs]
 
-    elif intent == "troubleshooting":
-        symptom = text
-        diagnosis = await catalog_svc.diagnose_symptom(
-            session,
-            symptom=symptom,
-            appliance_type=state.get("appliance_type"),
-            brand=state.get("brand"),
+    if ps and model:
+        compat = await catalog_svc.check_compatibility(
+            session, ps_number=ps, model_number=model
         )
+        payload["compatibility"] = compat.model_dump()
+        allowed.add(compat.ps_number)
+
+    diagnosis = await catalog_svc.diagnose_symptom(
+        session,
+        symptom=text,
+        appliance_type=state.get("appliance_type"),
+        brand=state.get("brand"),
+    )
+    if diagnosis.candidate_parts:
         payload["diagnosis"] = diagnosis.model_dump()
         allowed.update(c.ps_number for c in diagnosis.candidate_parts)
-        docs = await retrieval_svc.search_documents(
-            session, query=symptom, doc_type="troubleshooting", limit=4
+
+    if not ps:
+        install_hits = await retrieval_svc.search_documents(
+            session,
+            query=text,
+            doc_type="install_guide",
+            limit=5,
         )
-        payload["documents"] = [d.model_dump() for d in docs]
+        if install_hits:
+            payload["install_stories"] = [d.model_dump() for d in install_hits]
+            allowed.update(
+                d.part_ps_number for d in install_hits if d.part_ps_number
+            )
+
+    docs = await retrieval_svc.search_documents(session, query=text, limit=5)
+    other_docs = [d for d in docs if d.doc_type != "install_guide"]
+    if other_docs:
+        payload["documents"] = [d.model_dump() for d in other_docs]
 
     return {"tool_payload": payload, "allowed_ps_numbers": sorted(allowed)}
 
@@ -233,83 +246,26 @@ async def composer_node(state: AgentState, config: RunnableConfig) -> dict[str, 
     _ = config
     text = _last_user_text(state)
     tool_payload = state.get("tool_payload") or {}
-    intent = state.get("intent", "product_search")
 
-    from app.core.config import settings
+    if not is_llm_configured():
+        return {"final_response": _LLM_UNAVAILABLE}
 
-    if settings.anthropic_api_key:
-        model = get_chat_model(streaming=False)
-        prompt = _prompt(
-            "composer",
-            tool_payload=json.dumps(tool_payload, indent=2),
-            user_message=text,
-        )
-        try:
-            resp = await model.ainvoke(prompt)
-            answer = resp.content if isinstance(resp.content, str) else str(resp.content)
-            return {"final_response": answer}
-        except Exception:  # noqa: BLE001
-            pass
-
-    # Template fallback when LLM unavailable.
-    if intent == "compatibility" and "compatibility" in tool_payload:
-        comp = tool_payload["compatibility"]
-        if isinstance(comp, dict):
-            answer = comp.get("message", "Compatibility could not be determined.")
-            return {"final_response": str(answer)}
-
-    if intent == "installation" and "installation" in tool_payload:
-        guide = tool_payload["installation"]
-        if isinstance(guide, dict):
-            steps = guide.get("steps") or []
-            lines = [
-                f"Installation for {guide.get('part_name', 'part')} ({guide.get('ps_number')}):"
-            ]
-            for step in steps:
-                if isinstance(step, dict):
-                    lines.append(f"{step.get('order', '?')}. {step.get('text', '')}")
-            if guide.get("video_url"):
-                lines.append(f"Video: {guide['video_url']}")
-            lines.append(
-                "Unplug the appliance and shut off the water supply before servicing, "
-                "when applicable."
+    model = get_chat_model(streaming=False)
+    prompt = _prompt(
+        "composer",
+        tool_payload=json.dumps(tool_payload, indent=2),
+        user_message=text,
+    )
+    try:
+        resp = await model.ainvoke(prompt)
+        answer = resp.content if isinstance(resp.content, str) else str(resp.content)
+        return {"final_response": answer}
+    except Exception:  # noqa: BLE001
+        return {
+            "final_response": (
+                "I couldn't reach the language model. Check ANTHROPIC_API_KEY and try again."
             )
-            return {"final_response": "\n".join(lines)}
-
-    if intent == "troubleshooting" and "diagnosis" in tool_payload:
-        diag = tool_payload["diagnosis"]
-        if isinstance(diag, dict):
-            parts = diag.get("candidate_parts") or []
-            if not parts:
-                return {
-                    "final_response": (
-                        "I couldn't match parts for that symptom yet. "
-                        "Try adding your appliance brand or model number."
-                    )
-                }
-            lines = ["Based on your symptom, these parts may help:"]
-            for p in parts[:5]:
-                if isinstance(p, dict):
-                    lines.append(f"- {p.get('ps_number')}: {p.get('name')}")
-            return {"final_response": "\n".join(lines)}
-
-    if "parts" in tool_payload:
-        parts = tool_payload["parts"]
-        if isinstance(parts, list) and parts:
-            lines = ["Here are matching parts:"]
-            for p in parts[:5]:
-                if isinstance(p, dict):
-                    price = p.get("price_cents")
-                    price_str = f"${price / 100:.2f}" if price else "price unavailable"
-                    lines.append(f"- {p.get('ps_number')}: {p.get('name')} ({price_str})")
-            return {"final_response": "\n".join(lines)}
-
-    return {
-        "final_response": (
-            "I found some catalog data but need a bit more detail. "
-            "Share a part number (PS…) or appliance model if you have one."
-        )
-    }
+        }
 
 
 async def output_guardrail_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -319,7 +275,12 @@ async def output_guardrail_node(state: AgentState, config: RunnableConfig) -> di
     if state.get("ps_number"):
         allowed.add(state["ps_number"])
 
-    requires_safety = state.get("intent") in {"installation", "troubleshooting"}
+    tool_payload = state.get("tool_payload") or {}
+    requires_safety = is_llm_configured() and bool(
+        tool_payload.get("installation")
+        or tool_payload.get("install_stories")
+        or tool_payload.get("diagnosis")
+    )
     verdict = validate_output(
         text,
         allowed_ps_numbers=allowed,

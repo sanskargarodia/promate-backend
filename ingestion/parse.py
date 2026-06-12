@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
-from ingestion.types import ScrapedDocument, ScrapedModel, ScrapedPart
+from ingestion.types import RepairStory, ScrapedDocument, ScrapedModel, ScrapedPart
 
 BASE_URL = "https://www.partselect.com"
 PS_LINK_RE = re.compile(r"/PS(\d+)[^\"'\\s]*", re.I)
@@ -151,16 +151,21 @@ def parse_part_page(html: str, *, source_url: str) -> ScrapedPart:
             text = block.get_text(" ", strip=True)
             replaced = re.findall(r"\b[A-Z]{1,3}\d{5,}[A-Z0-9]*\b", text)
 
-    install_steps: list[str] = []
+    install_blocks: list[str] = []
+    repair_stories: list[tuple[str, str]] = []
     repair = soup.select_one("#RepairStories")
     if repair:
         section = repair.find_parent(class_=re.compile("expanded|section"))
-        if section:
-            for story in section.select(".pd__repair-story, .repair-story, article"):
+        container = section if section is not None else repair.find_parent("div")
+        if container:
+            for idx, story in enumerate(container.select(".repair-story")[:5], start=1):
+                title_el = story.select_one(".repair-story__title")
+                story_title = _text(title_el) or f"Repair story {idx}"
                 body = story.get_text("\n", strip=True)
                 if body:
-                    install_steps.append(body)
-    install_instructions = "\n\n---\n\n".join(install_steps[:5]) if install_steps else None
+                    install_blocks.append(body)
+                    repair_stories.append((story_title, body))
+    install_instructions = "\n\n---\n\n".join(install_blocks) if install_blocks else None
 
     compatible_models: list[str] = []
     model_section = soup.select_one("#ModelCrossReference")
@@ -186,6 +191,9 @@ def parse_part_page(html: str, *, source_url: str) -> ScrapedPart:
         install_difficulty=difficulty,
         install_time_minutes=install_minutes,
         install_instructions=install_instructions,
+        repair_stories=[
+            RepairStory(title=title, content=content) for title, content in repair_stories
+        ],
         video_url=video_url,
         rating=rating,
         rating_count=rating_count,
@@ -253,21 +261,40 @@ def part_to_documents(part: ScrapedPart) -> list[ScrapedDocument]:
                 source_url=part.source_url,
             )
         )
-    if part.install_instructions:
-        docs.append(
-            ScrapedDocument(
-                doc_type="install_guide",
-                title=f"Installation instructions for {part.ps_number}",
-                content=part.install_instructions,
-                part_ps_number=part.ps_number,
-                source_url=part.source_url,
-                metadata={
-                    "difficulty": part.install_difficulty,
-                    "time_minutes": part.install_time_minutes,
-                    "video_url": part.video_url,
-                },
+
+    story_meta = {
+        "difficulty": part.install_difficulty,
+        "time_minutes": part.install_time_minutes,
+        "video_url": part.video_url,
+    }
+    if part.repair_stories:
+        for idx, story in enumerate(part.repair_stories, start=1):
+            docs.append(
+                ScrapedDocument(
+                    doc_type="install_guide",
+                    title=story.title,
+                    content=story.content,
+                    part_ps_number=part.ps_number,
+                    source_url=part.source_url,
+                    metadata={"story_index": idx, **story_meta},
+                )
             )
-        )
+    elif part.install_instructions:
+        for idx, block in enumerate(
+            [b.strip() for b in part.install_instructions.split("\n\n---\n\n") if b.strip()],
+            start=1,
+        ):
+            docs.append(
+                ScrapedDocument(
+                    doc_type="install_guide",
+                    title=f"Repair story {idx} for {part.ps_number}",
+                    content=block,
+                    part_ps_number=part.ps_number,
+                    source_url=part.source_url,
+                    metadata={"story_index": idx, **story_meta},
+                )
+            )
+
     if part.symptoms_fixed:
         docs.append(
             ScrapedDocument(
