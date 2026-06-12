@@ -11,12 +11,15 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import RunnableConfig
 
 from app.agents.state import AgentState, Intent
+from app.agents.tool_router import plan_transactional_tools
+from app.agents.transaction_state import TransactionPhase, TransactionStateMachine
 from app.core.config import is_llm_configured
 from app.core.llm import get_chat_model, get_guardrail_model
 from app.guardrails.input import run_input_guardrails
 from app.guardrails.output import validate_output
 from app.services import catalog as catalog_svc
 from app.services import retrieval as retrieval_svc
+from app.tools import transactional as txn_tools
 
 PS_RE = re.compile(r"\b(PS\d+)\b", re.I)
 MODEL_RE = re.compile(r"\b([A-Z]{2,}\d{3,}[A-Z0-9]*)\b")
@@ -167,42 +170,19 @@ def needs_clarification(state: AgentState) -> bool:
     intent = state.get("intent")
     ps = state.get("ps_number")
     model = state.get("model_number")
-    if intent in {"installation", "product_search"} and not ps:
-        return True
     return intent == "compatibility" and (not ps or not model)
 
 
-async def worker_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
-    """Gather catalog context from extracted entities — intent-agnostic."""
-    session = config["configurable"]["session"]
-    text = _last_user_text(state)
+async def _gather_support_context(
+    state: AgentState,
+    session,
+    text: str,
+    payload: dict[str, object],
+    allowed: set[str],
+) -> None:
+    """Non-transactional catalog context (compatibility, install, troubleshooting)."""
     ps = state.get("ps_number")
     model = state.get("model_number")
-
-    payload: dict[str, object] = {}
-    allowed: set[str] = set()
-
-    parts = await catalog_svc.search_parts(
-        session,
-        query=text,
-        appliance_type=state.get("appliance_type"),
-        limit=8,
-    )
-    if parts:
-        payload["matching_parts"] = [r.model_dump() for r in parts]
-        allowed.update(r.ps_number for r in parts)
-
-    if ps:
-        part = await catalog_svc.get_part(session, ps)
-        if part:
-            payload["part"] = part.model_dump()
-            allowed.add(ps)
-        guide = await catalog_svc.get_installation_guide(
-            session, ps_number=ps, query=text, limit=3
-        )
-        if guide:
-            payload["installation"] = guide.model_dump()
-            allowed.add(guide.ps_number)
 
     if ps and model:
         compat = await catalog_svc.check_compatibility(
@@ -211,41 +191,148 @@ async def worker_node(state: AgentState, config: RunnableConfig) -> dict[str, An
         payload["compatibility"] = compat.model_dump()
         allowed.add(compat.ps_number)
 
-    diagnosis = await catalog_svc.diagnose_symptom(
-        session,
-        symptom=text,
-        appliance_type=state.get("appliance_type"),
-        brand=state.get("brand"),
-    )
-    if diagnosis.candidate_parts:
-        payload["diagnosis"] = diagnosis.model_dump()
-        allowed.update(c.ps_number for c in diagnosis.candidate_parts)
-
-    if not ps:
-        install_hits = await retrieval_svc.search_documents(
-            session,
-            query=text,
-            doc_type="install_guide",
-            limit=5,
+    if ps and state.get("intent") == "installation":
+        guide = await catalog_svc.get_installation_guide(
+            session, ps_number=ps, query=text, limit=3
         )
-        if install_hits:
-            payload["install_stories"] = [d.model_dump() for d in install_hits]
-            allowed.update(
-                d.part_ps_number for d in install_hits if d.part_ps_number
-            )
+        if guide:
+            payload["installation"] = guide.model_dump()
+            allowed.add(guide.ps_number)
+
+    if state.get("intent") == "troubleshooting":
+        diagnosis = await catalog_svc.diagnose_symptom(
+            session,
+            symptom=text,
+            appliance_type=state.get("appliance_type"),
+            brand=state.get("brand"),
+        )
+        if diagnosis.candidate_parts:
+            payload["diagnosis"] = diagnosis.model_dump()
+            allowed.update(c.ps_number for c in diagnosis.candidate_parts)
 
     docs = await retrieval_svc.search_documents(session, query=text, limit=5)
     other_docs = [d for d in docs if d.doc_type != "install_guide"]
     if other_docs:
         payload["documents"] = [d.model_dump() for d in other_docs]
 
-    return {"tool_payload": payload, "allowed_ps_numbers": sorted(allowed)}
+
+async def transactional_tools_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+    """Execute mandatory transactional tools; never let the LLM guess inventory or pricing."""
+    session = config["configurable"]["session"]
+    text = _last_user_text(state)
+
+    phase_raw = state.get("transaction_phase") or TransactionPhase.SEARCHING
+    machine = TransactionStateMachine(phase_raw)
+
+    tool_results: dict[str, object] = dict(state.get("tool_results") or {})
+    purchase_handoffs: list[dict[str, object]] = list(state.get("purchase_handoffs") or [])
+    allowed: set[str] = set(state.get("allowed_ps_numbers") or [])
+    identified_part_id = state.get("identified_part_id")
+    catalog_grounded = True
+
+    for call in plan_transactional_tools(state):
+        if call.name == "get_part_details":
+            result = await txn_tools.get_part_details(session, call.arguments["part_id"])
+            tool_results["get_part_details"] = result.model_dump()
+            if result.found:
+                machine.after_part_details(result)
+                identified_part_id = result.part_id
+                allowed.add(result.part_id)
+            else:
+                catalog_grounded = False
+
+        elif call.name == "search_parts":
+            result = await txn_tools.search_parts(
+                session,
+                call.arguments["symptom_or_model"],
+                appliance_type=call.arguments.get("appliance_type"),
+            )
+            tool_results["search_parts"] = result.model_dump()
+            machine.after_search(parts_found=len(result.parts))
+            if not result.found:
+                catalog_grounded = False
+            for part in result.parts:
+                allowed.add(part.part_id)
+            if len(result.parts) == 1:
+                machine.after_part_details(result.parts[0])
+                identified_part_id = result.parts[0].part_id
+
+        elif call.name == "get_order_status":
+            result = await txn_tools.get_order_status(
+                session, call.arguments["order_id"]
+            )
+            tool_results["get_order_status"] = result.model_dump()
+
+        elif call.name == "purchase_handoff":
+            part_id = call.arguments.get("part_id") or identified_part_id
+            handoff = await txn_tools.prepare_purchase_handoff(
+                session,
+                part_id=part_id,
+                machine=machine,
+            )
+            tool_results["purchase_handoff"] = handoff.model_dump()
+            if handoff.allowed and handoff.ps_number:
+                identified_part_id = handoff.ps_number
+                allowed.add(handoff.ps_number)
+                purchase_handoffs.append(handoff.model_dump())
+
+    tool_payload: dict[str, object] = {
+        "tool_results": tool_results,
+        "transaction_phase": machine.phase.value,
+    }
+    if tool_results.get("search_parts"):
+        sr = tool_results["search_parts"]
+        if isinstance(sr, dict) and sr.get("parts"):
+            tool_payload["matching_parts"] = sr["parts"]
+    if tool_results.get("get_part_details"):
+        details = tool_results["get_part_details"]
+        if isinstance(details, dict) and details.get("found"):
+            tool_payload["part"] = details
+
+    await _gather_support_context(state, session, text, tool_payload, allowed)
+
+    compat = tool_payload.get("compatibility")
+    if isinstance(compat, dict):
+        machine.after_compatibility(compatible=compat.get("compatible"))
+
+    tool_payload["transaction_phase"] = machine.phase.value
+
+    return {
+        "transaction_phase": machine.phase.value,
+        "identified_part_id": identified_part_id,
+        "tool_results": tool_results,
+        "tool_payload": tool_payload,
+        "purchase_handoffs": purchase_handoffs,
+        "allowed_ps_numbers": sorted(allowed),
+        "catalog_grounded": catalog_grounded,
+    }
+
+
+async def worker_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+    """Alias for transactional tool execution (tool-first architecture)."""
+    return await transactional_tools_node(state, config)
 
 
 async def composer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     _ = config
     text = _last_user_text(state)
     tool_payload = state.get("tool_payload") or {}
+
+    if state.get("catalog_grounded") is False:
+        tr = state.get("tool_results") or {}
+        details = tr.get("get_part_details")
+        if isinstance(details, dict) and details.get("found") is False:
+            return {"final_response": "I cannot find that part in our catalog."}
+        search = tr.get("search_parts")
+        if (
+            isinstance(search, dict)
+            and search.get("found") is False
+            and state.get("intent") in {"product_search", "transaction"}
+        ):
+            return {
+                "final_response": "I cannot find that part in our catalog. "
+                "Try a PS number or describe your refrigerator/dishwasher issue."
+            }
 
     if not is_llm_configured():
         return {"final_response": _LLM_UNAVAILABLE}

@@ -87,6 +87,10 @@ def parse_part_page(html: str, *, source_url: str) -> ScrapedPart:
         raise ValueError(f"Could not determine PS number for {source_url}")
     ps_str = ps_match.group(0).upper()
 
+    canonical_el = soup.select_one('link[rel="canonical"]')
+    if canonical_el and canonical_el.get("href"):
+        source_url = urljoin(BASE_URL, canonical_el["href"])
+
     mpn_el = soup.select_one('[itemprop=mpn]')
     brand_el = soup.select_one('[itemprop=brand] [itemprop=name]')
     desc_el = soup.select_one('[itemprop=description]')

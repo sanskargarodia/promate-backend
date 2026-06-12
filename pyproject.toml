@@ -32,8 +32,6 @@ dependencies = [
     "playwright>=1.47",
     "beautifulsoup4>=4.12",
     "lxml>=5.3",
-    # Payments
-    "stripe>=11.0",
 ]
 
 [dependency-groups]

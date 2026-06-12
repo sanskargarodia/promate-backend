@@ -21,13 +21,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agents.checkpointer import close_checkpointer, init_checkpointer
 from app.agents.graph import build_graph, set_compiled_graph
 from app.api.v1.router import api_router
+from app.catalog.startup import ensure_catalog_ready
 from app.core.config import settings
+from app.core.db import SessionLocal
 from app.core.logging import configure_logging
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level)
+    try:
+        async with SessionLocal() as db_session:
+            await ensure_catalog_ready(db_session)
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning("Catalog validation skipped: %s", exc)
     try:
         checkpointer = await init_checkpointer()
         set_compiled_graph(build_graph(checkpointer=checkpointer))

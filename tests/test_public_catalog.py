@@ -1,6 +1,17 @@
 """Tests for public catalog CSV import."""
 
+from ingestion.persist import _pick_source_url
 from ingestion.public_catalog import row_to_scraped_part
+
+CANONICAL = (
+    "https://www.partselect.com/PS11752778-Whirlpool-WPW10321304-Refrigerator-Door-Shelf-Bin.htm"
+)
+SHORT = "https://www.partselect.com/PS11752778.htm"
+
+
+def test_pick_source_url_prefers_canonical_over_short() -> None:
+    assert _pick_source_url(CANONICAL, SHORT) == CANONICAL
+    assert _pick_source_url(SHORT, CANONICAL) == CANONICAL
 
 
 def test_row_to_scraped_part_refrigerator() -> None:

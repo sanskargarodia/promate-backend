@@ -19,10 +19,10 @@ def _route_after_input(state: AgentState) -> Literal["refusal", "supervisor"]:
     return "supervisor"
 
 
-def _route_after_supervisor(state: AgentState) -> Literal["clarification", "worker"]:
+def _route_after_supervisor(state: AgentState) -> Literal["clarification", "transactional_tools"]:
     if nodes.needs_clarification(state):
         return "clarification"
-    return "worker"
+    return "transactional_tools"
 
 
 def build_graph(*, checkpointer: BaseCheckpointSaver | None = None):
@@ -32,7 +32,7 @@ def build_graph(*, checkpointer: BaseCheckpointSaver | None = None):
     graph.add_node("refusal", nodes.refusal_node)
     graph.add_node("supervisor", nodes.supervisor_node)
     graph.add_node("clarification", nodes.clarification_node)
-    graph.add_node("worker", nodes.worker_node)
+    graph.add_node("transactional_tools", nodes.transactional_tools_node)
     graph.add_node("composer", nodes.composer_node)
     graph.add_node("output_guardrail", nodes.output_guardrail_node)
 
@@ -41,7 +41,7 @@ def build_graph(*, checkpointer: BaseCheckpointSaver | None = None):
     graph.add_conditional_edges("supervisor", _route_after_supervisor)
     graph.add_edge("refusal", END)
     graph.add_edge("clarification", END)
-    graph.add_edge("worker", "composer")
+    graph.add_edge("transactional_tools", "composer")
     graph.add_edge("composer", "output_guardrail")
     graph.add_edge("output_guardrail", END)
 

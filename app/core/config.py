@@ -62,11 +62,7 @@ class Settings(BaseSettings):
             return "postgresql+psycopg://" + url.removeprefix("postgres://")
         return url
 
-    # ── Stripe (test mode) ───────────────────────────────────────────────────
-    stripe_secret_key: str | None = None
-    stripe_webhook_secret: str | None = None
-    checkout_success_url: str = "http://localhost:3000/checkout/success"
-    checkout_cancel_url: str = "http://localhost:3000/cart"
+    catalog_csv_path: str | None = None
 
     # ── Observability ────────────────────────────────────────────────────────
     langsmith_tracing: bool = False

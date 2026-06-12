@@ -25,6 +25,17 @@ logger = logging.getLogger(__name__)
 sync_engine = create_engine(settings.sqlalchemy_sync_database_url, pool_pre_ping=True)
 SyncSession = sessionmaker(sync_engine, expire_on_commit=False)
 
+# Scrape requests often use short /PS123.htm URLs; CSV product_url has the canonical slug.
+_SHORT_PARTSELECT_URL = re.compile(r"^https://www\.partselect\.com/PS\d+\.htm/?$", re.I)
+
+
+def _pick_source_url(existing: str | None, incoming: str) -> str:
+    if not existing:
+        return incoming
+    if _SHORT_PARTSELECT_URL.match(incoming) and not _SHORT_PARTSELECT_URL.match(existing):
+        return existing
+    return incoming
+
 
 def slugify(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
@@ -53,7 +64,7 @@ def upsert_part(session: Session, part: ScrapedPart) -> None:
     row.description = part.description
     row.replaced_part_numbers = part.replaced_part_numbers
     row.symptoms_fixed = part.symptoms_fixed
-    row.source_url = part.source_url
+    row.source_url = _pick_source_url(row.source_url, part.source_url)
 
 
 def upsert_model(session: Session, model: ApplianceModel) -> None:

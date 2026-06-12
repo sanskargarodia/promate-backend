@@ -114,7 +114,13 @@ def download_catalog_csv(url: str = DEFAULT_CATALOG_CSV_URL) -> str:
     response.raise_for_status()
     size_mb = len(response.content) / (1024 * 1024)
     logger.info("Downloaded catalog CSV (%.1f MB)", size_mb)
-    return response.text
+    csv_text = response.text
+    from app.catalog.csv_schema import validate_parts_csv_text
+
+    validation = validate_parts_csv_text(csv_text, min_rows=100)
+    if not validation.ok:
+        raise ValueError(f"Catalog CSV failed validation: {'; '.join(validation.errors)}")
+    return csv_text
 
 
 def iter_catalog_parts(csv_text: str) -> Iterable[ScrapedPart]:

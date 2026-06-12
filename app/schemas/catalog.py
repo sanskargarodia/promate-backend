@@ -41,7 +41,7 @@ class InstallationGuide(BaseModel):
     difficulty: str | None = None
     time_minutes: int | None = None
     video_url: str | None = None
-    stories: list["DocumentChunk"] = Field(
+    stories: list[DocumentChunk] = Field(
         default_factory=list,
         description="Semantically retrieved repair-story chunks for this part.",
     )
