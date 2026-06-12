@@ -46,8 +46,21 @@ class Settings(BaseSettings):
     embedding_dim: int = 384  # bge-small = 384; Titan v2 = 1024 — pgvector column must match
 
     # ── Database ─────────────────────────────────────────────────────────────
-    database_url: str = "postgresql+psycopg://promate:promate@localhost:5432/promate"
-    database_url_sync: str = "postgresql://promate:promate@localhost:5432/promate"
+    database_url: str = "postgresql+psycopg://promate:promate@localhost:5433/promate"
+    # libpq conninfo for LangGraph PostgresSaver / psycopg pools (postgresql://…).
+    database_url_sync: str = "postgresql://promate:promate@localhost:5433/promate"
+
+    @property
+    def sqlalchemy_sync_database_url(self) -> str:
+        """Sync SQLAlchemy URL using psycopg3 (not psycopg2)."""
+        url = self.database_url_sync
+        if "+psycopg" in url or "+psycopg2" in url:
+            return url
+        if url.startswith("postgresql://"):
+            return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+        if url.startswith("postgres://"):
+            return "postgresql+psycopg://" + url.removeprefix("postgres://")
+        return url
 
     # ── Stripe (test mode) ───────────────────────────────────────────────────
     stripe_secret_key: str | None = None
