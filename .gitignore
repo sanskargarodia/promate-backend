@@ -220,3 +220,6 @@ __marimo__/
 # Local-only docs (keep out of version control)
 CLAUDE.md
 AGENT.md
+
+# Ingestion HTML cache (populate via `python -m ingestion scrape`)
+ingestion/cache/
