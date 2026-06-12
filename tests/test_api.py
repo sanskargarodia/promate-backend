@@ -81,6 +81,7 @@ async def test_chat_install_question(client: AsyncClient) -> None:
     assert "token" in text or "done" in text
 
 
+
 async def test_health(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/health")
     assert resp.status_code == 200
