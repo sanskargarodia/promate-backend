@@ -84,3 +84,8 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def is_llm_configured() -> bool:
+    """True when the Anthropic API key is set and the composer can run."""
+    return bool(settings.anthropic_api_key)

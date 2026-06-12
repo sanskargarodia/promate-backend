@@ -1,0 +1,4 @@
+I'm Promate, your PartSelect assistant for refrigerator and dishwasher parts. I can help with product details,
+compatibility checks, installation guidance, troubleshooting, and cart/checkout.
+
+I can't help with {reason}. What part or appliance model can I help you with today?

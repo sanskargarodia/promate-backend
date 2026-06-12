@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -177,6 +177,15 @@ def upsert_symptoms(session: Session, part: ScrapedPart) -> None:
             session.add(PartSymptom(part_ps_number=part.ps_number, symptom_id=symptom.id))
 
 
+def clear_install_guide_documents(session: Session, part_ps_number: str) -> None:
+    session.execute(
+        delete(Document).where(
+            Document.part_ps_number == part_ps_number,
+            Document.doc_type == "install_guide",
+        )
+    )
+
+
 def upsert_document(session: Session, doc: ScrapedDocument, vector: list[float]) -> None:
     existing = session.scalar(
         select(Document).where(
@@ -230,6 +239,8 @@ def persist_scraped_part(
 
     docs = documents if documents is not None else []
     if embedder is not None and docs:
+        if any(d.doc_type == "install_guide" for d in docs):
+            clear_install_guide_documents(session, part.ps_number)
         vectors = embedder.embed_documents([d.content for d in docs])  # type: ignore[attr-defined]
         for doc, vector in zip(docs, vectors, strict=True):
             upsert_document(session, doc, vector)
