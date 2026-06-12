@@ -132,12 +132,21 @@ async def supervisor_node(state: AgentState, config: RunnableConfig) -> dict[str
     }:
         intent = "product_search"
 
+    ps_number = routed.get("ps_number") or state.get("ps_number")
+    model_number = routed.get("model_number") or state.get("model_number")
+
+    lowered = text.lower()
+    if re.search(r"\b(this|that)\s+part\b", lowered) and any(
+        w in lowered for w in ("compatible", "fit", "work with")
+    ):
+        intent = "compatibility"
+
     return {
         "intent": intent,
-        "ps_number": routed.get("ps_number"),
-        "model_number": routed.get("model_number"),
-        "appliance_type": routed.get("appliance_type"),
-        "brand": routed.get("brand"),
+        "ps_number": ps_number,
+        "model_number": model_number,
+        "appliance_type": routed.get("appliance_type") or state.get("appliance_type"),
+        "brand": routed.get("brand") or state.get("brand"),
     }
 
 
@@ -159,7 +168,7 @@ async def clarification_node(state: AgentState, config: RunnableConfig) -> dict[
     return {"final_response": text, "messages": [AIMessage(content=text)]}
 
 
-def _needs_clarification(state: AgentState) -> bool:
+def needs_clarification(state: AgentState) -> bool:
     intent = state.get("intent")
     ps = state.get("ps_number")
     model = state.get("model_number")

@@ -18,6 +18,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agents.checkpointer import close_checkpointer, init_checkpointer
+from app.agents.graph import build_graph, set_compiled_graph
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -26,7 +28,19 @@ from app.core.logging import configure_logging
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level)
+    try:
+        checkpointer = await init_checkpointer()
+        set_compiled_graph(build_graph(checkpointer=checkpointer))
+    except Exception as exc:  # noqa: BLE001
+        configure_logging(settings.log_level)
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Postgres checkpointer unavailable (%s); multi-turn chat disabled.", exc
+        )
+        set_compiled_graph(build_graph(checkpointer=None))
     yield
+    await close_checkpointer()
 
 
 app = FastAPI(

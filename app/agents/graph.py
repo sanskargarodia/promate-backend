@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Literal
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -10,6 +9,8 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents import nodes
 from app.agents.state import AgentState
+
+_compiled_graph = None
 
 
 def _route_after_input(state: AgentState) -> Literal["refusal", "supervisor"]:
@@ -19,7 +20,7 @@ def _route_after_input(state: AgentState) -> Literal["refusal", "supervisor"]:
 
 
 def _route_after_supervisor(state: AgentState) -> Literal["clarification", "worker"]:
-    if nodes._needs_clarification(state):
+    if nodes.needs_clarification(state):
         return "clarification"
     return "worker"
 
@@ -47,6 +48,12 @@ def build_graph(*, checkpointer: BaseCheckpointSaver | None = None):
     return graph.compile(checkpointer=checkpointer)
 
 
-@lru_cache
-def get_compiled_graph_no_checkpoint():
+def set_compiled_graph(graph) -> None:
+    global _compiled_graph
+    _compiled_graph = graph
+
+
+def get_compiled_graph():
+    if _compiled_graph is not None:
+        return _compiled_graph
     return build_graph(checkpointer=None)

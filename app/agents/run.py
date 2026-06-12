@@ -9,7 +9,7 @@ from uuid import uuid4
 from langchain_core.messages import HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.graph import get_compiled_graph_no_checkpoint
+from app.agents.graph import get_compiled_graph
 from app.schemas.catalog import PartResult
 
 
@@ -20,7 +20,7 @@ async def run_agent_turn(
     thread_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream high-level agent events for the chat SSE contract."""
-    graph = get_compiled_graph_no_checkpoint()
+    graph = get_compiled_graph()
     tid = thread_id or str(uuid4())
     config = {"configurable": {"thread_id": tid, "session": session}}
 
