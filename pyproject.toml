@@ -1,0 +1,70 @@
+[project]
+name = "promate-backend"
+version = "0.1.0"
+description = "ProMate backend — FastAPI gateway + LangGraph agent for PartSelect (fridge/dishwasher) parts."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    # Web / API
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sse-starlette>=2.1",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+    # Agent
+    "langgraph>=0.2.60",
+    "langgraph-checkpoint-postgres>=2.0",
+    "langchain-core>=0.3",
+    "langchain-anthropic>=0.3",
+    "langchain-aws>=0.2",
+    # LLM providers (only reached through app/core/llm.py)
+    "anthropic>=0.40",
+    "boto3>=1.35",
+    # Data
+    "sqlalchemy>=2.0",
+    "psycopg[binary,pool]>=3.2",
+    "pgvector>=0.3",
+    # Embeddings (local default; Bedrock Titan is the cloud swap)
+    "fastembed>=0.4",
+    # Ingestion / scraping
+    "playwright>=1.47",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.3",
+    # Payments
+    "stripe>=11.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+]
+
+# This is an application, not a library — uv installs deps into the venv but does
+# not try to build/install the `app` package itself.
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "C4", "SIM"]
+ignore = ["B008"]  # FastAPI uses Depends()/Query() as call-in-default args
+
+[tool.mypy]
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
