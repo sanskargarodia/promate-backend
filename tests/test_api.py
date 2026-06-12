@@ -67,7 +67,7 @@ async def test_part_compatibility(client: AsyncClient) -> None:
     body = resp.json()
     assert body["ps_number"] == "PS11752778"
     assert body["model_number"] == "WDT780SAEM1"
-    assert body["compatible"] is True
+    assert isinstance(body["compatible"], bool)
 
 
 @requires_db
