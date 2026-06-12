@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: promate
+      POSTGRES_PASSWORD: promate
+      POSTGRES_DB: promate
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promate -d promate"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      # Point the app at the postgres service (overrides .env localhost URLs).
+      DATABASE_URL: postgresql+psycopg://promate:promate@postgres:5432/promate
+      DATABASE_URL_SYNC: postgresql://promate:promate@postgres:5432/promate
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  pgdata:
