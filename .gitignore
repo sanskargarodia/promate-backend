@@ -223,3 +223,8 @@ AGENT.md
 
 # Ingestion HTML cache (populate via `python -m ingestion scrape`)
 ingestion/cache/
+
+# AgentCore deploy (local secrets + toolkit state)
+deploy/env.agentcore.local
+.bedrock_agentcore.yaml
+.agentcore_identity_*.env

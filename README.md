@@ -14,6 +14,14 @@ uv run python -m ingestion import-catalog   # if catalog empty
 uv run uvicorn app.main:app --reload   # http://localhost:8000
 ```
 
+**AgentCore Runtime (same graph, port 8080):**
+
+```bash
+uv run python -m app.agent_core_entrypoint
+# POST http://127.0.0.1:8080/invocations  {"prompt": "..."}
+# Streams text/event-stream SSE chunks matching /api/v1/chat event payloads
+```
+
 Health checks:
 
 - `GET /health` — liveness (no deps)
@@ -41,12 +49,12 @@ Purchase intent in chat advances to `PURCHASE_READY` and emits a `purchase_hando
 
 ## Architecture seam ("scale without rewrites")
 
-| Concern    | Local (`.env` default) | Cloud (config flip)            |
-|------------|------------------------|--------------------------------|
-| LLM        | Anthropic API          | Same key injected on AgentCore Runtime |
+| Concern    | Local (`.env` default) | Cloud (config flip)                           |
+| ---------- | ---------------------- | --------------------------------------------- |
+| LLM        | Anthropic API          | Same key injected on AgentCore Runtime        |
 | Embeddings | fastembed (bge-small)  | Bedrock Titan (`EMBEDDINGS_PROVIDER=bedrock`) |
-| Database   | Postgres + pgvector    | Aurora Serverless v2 (`DATABASE_URL`) |
-| Agent host | uvicorn / FastAPI      | Bedrock AgentCore Runtime      |
+| Database   | Postgres + pgvector    | Aurora Serverless v2 (`DATABASE_URL`)         |
+| Agent host | uvicorn / FastAPI      | Bedrock AgentCore Runtime                     |
 
 ## Layout
 
@@ -61,3 +69,8 @@ app/
 ```
 
 Tooling: `uv run ruff check .`, `uv run mypy app`, `uv run pytest`, `uv run python -m evals`.
+
+## Deploy to AWS (AgentCore Runtime)
+
+See **[deploy/README.md](deploy/README.md)** for Aurora setup, `agentcore configure` /
+`agentcore deploy`, and smoke-test scripts.
