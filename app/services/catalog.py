@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import or_, select
+from sqlalchemy import Text, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.catalog import Document, Part, PartModelCompatibility
@@ -18,6 +18,11 @@ from app.schemas.catalog import (
 )
 
 PS_RE = re.compile(r"PS\d+", re.I)
+
+
+def _jsonb_text_ilike(column, pattern: str):
+    """Search JSONB array columns via cast to text (PostgreSQL)."""
+    return cast(column, Text).ilike(pattern)
 
 
 def _part_to_result(part: Part) -> PartResult:
@@ -84,7 +89,7 @@ async def search_parts(
                 Part.name.ilike(pattern),
                 Part.description.ilike(pattern),
                 Part.manufacturer_part_number.ilike(pattern),
-                Part.symptoms_fixed.astext.ilike(pattern),
+                _jsonb_text_ilike(Part.symptoms_fixed, pattern),
             )
         )
 
@@ -207,7 +212,7 @@ async def diagnose_symptom(
     limit: int = 6,
 ) -> DiagnosisResult:
     pattern = f"%{symptom.strip()}%"
-    stmt = select(Part).where(Part.symptoms_fixed.astext.ilike(pattern))
+    stmt = select(Part).where(_jsonb_text_ilike(Part.symptoms_fixed, pattern))
     if appliance_type:
         stmt = stmt.where(Part.appliance_type == appliance_type.lower())
     if brand:

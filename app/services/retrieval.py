@@ -23,20 +23,18 @@ async def search_documents(
     embedder = get_embedder()
     vector = await asyncio.to_thread(embedder.embed_query, query)
 
-    stmt = select(
-        Document,
-        Document.embedding.cosine_distance(vector).label("distance"),
-    )
+    distance = Document.embedding.cosine_distance(vector).label("distance")
+    stmt = select(Document, distance).where(Document.embedding.isnot(None))
     if doc_type:
         stmt = stmt.where(Document.doc_type == doc_type)
     if part_ps_number:
         stmt = stmt.where(Document.part_ps_number == part_ps_number.upper())
 
-    stmt = stmt.order_by("distance").limit(limit)
+    stmt = stmt.order_by(distance).limit(limit)
     rows = (await session.execute(stmt)).all()
 
     chunks: list[DocumentChunk] = []
-    for doc, distance in rows:
+    for doc, dist in rows:
         chunks.append(
             DocumentChunk(
                 doc_type=doc.doc_type,
@@ -44,7 +42,7 @@ async def search_documents(
                 content=doc.content,
                 part_ps_number=doc.part_ps_number,
                 source_url=doc.source_url,
-                score=float(1.0 - distance) if distance is not None else None,
+                score=float(1.0 - dist) if dist is not None else None,
             )
         )
     return chunks

@@ -6,6 +6,12 @@ for Bedrock AgentCore Runtime — one graph, two hosts (Phase 2).
 
 from __future__ import annotations
 
+import asyncio
+import sys
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
