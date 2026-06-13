@@ -15,9 +15,44 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _with_aurora_ssl(url: str) -> str:
-    """Aurora/RDS requires TLS; psycopg needs an explicit sslmode in conninfo."""
-    if "rds.amazonaws.com" not in url or "sslmode=" in url:
+_LOCAL_DB_HOSTS = frozenset({"localhost", "127.0.0.1", "postgres"})
+
+
+def _normalize_libpq_url(url: str) -> str:
+    """Strip SQLAlchemy driver suffix so raw psycopg conninfo parses correctly."""
+    for prefix in (
+        "postgresql+psycopg://",
+        "postgresql+psycopg2://",
+        "postgres+psycopg://",
+    ):
+        if url.startswith(prefix):
+            return "postgresql://" + url.removeprefix(prefix)
+    if url.startswith("postgres://"):
+        return "postgresql://" + url.removeprefix("postgres://")
+    return url
+
+
+def _remote_db_host(url: str) -> str | None:
+    """Best-effort host extraction from a Postgres URL."""
+    if "://" not in url or "@" not in url:
+        return None
+    host_port = url.split("@", 1)[1].split("/", 1)[0]
+    return host_port.rsplit(":", 1)[0].lower()
+
+
+def _needs_db_ssl(url: str, *, app_env: str) -> bool:
+    """True when the target host is remote and should use TLS."""
+    if "rds.amazonaws.com" in url or ".amazonaws.com" in url:
+        return True
+    host = _remote_db_host(url)
+    if host is None or host in _LOCAL_DB_HOSTS:
+        return False
+    return app_env == "production"
+
+
+def _with_db_ssl(url: str, *, app_env: str) -> str:
+    """Append sslmode=require for Aurora and other remote production databases."""
+    if "sslmode=" in url or not _needs_db_ssl(url, app_env=app_env):
         return url
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}sslmode=require"
@@ -62,9 +97,11 @@ class Settings(BaseSettings):
     database_url_sync: str = "postgresql://promate:promate@localhost:5433/promate"
 
     @model_validator(mode="after")
-    def ensure_aurora_ssl(self) -> Self:
-        self.database_url = _with_aurora_ssl(self.database_url)
-        self.database_url_sync = _with_aurora_ssl(self.database_url_sync)
+    def normalize_database_urls(self) -> Self:
+        self.database_url = _with_db_ssl(
+            self.database_url, app_env=self.app_env)
+        sync = _normalize_libpq_url(self.database_url_sync)
+        self.database_url_sync = _with_db_ssl(sync, app_env=self.app_env)
         return self
 
     @property
