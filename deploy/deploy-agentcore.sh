@@ -14,7 +14,7 @@ export NO_COLOR=1
 export PYTHONIOENCODING=utf-8
 
 echo "Exporting requirements.txt..."
-./deploy/export-requirements.sh
+bash deploy/export-requirements.sh
 
 echo "Installing AgentCore deploy CLI..."
 python -m pip install --quiet bedrock-agentcore-starter-toolkit
