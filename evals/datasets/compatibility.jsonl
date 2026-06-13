@@ -1,0 +1,5 @@
+{"id":"compat_verified_fit","category":"compatibility","message":"Is PS11752778 compatible with WDT780SAEM1?","expect_intent":"compatibility","expect_tools":["get_part_details"]}
+{"id":"compat_will_it_fit","category":"compatibility","message":"Will PS11752778 fit model WDT780SAEM1?","expect_intent":"compatibility","expect_tools":["get_part_details"]}
+{"id":"compat_missing_model","category":"compatibility","message":"Is PS11752778 compatible with my dishwasher?","expect_intent":"compatibility","expect_clarification":true}
+{"id":"compat_missing_part","category":"compatibility","message":"Is this part compatible with WDT780SAEM1?","state":{"session_context":{"ps_number":"PS11752778"}},"expect_intent":"compatibility","expect_tools":["get_part_details"]}
+{"id":"compat_work_with_model","category":"compatibility","message":"Does PS11752778 work with my WDT780SAEM1 model?","expect_intent":"compatibility","expect_tools":["get_part_details"]}

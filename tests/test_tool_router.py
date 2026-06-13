@@ -22,6 +22,19 @@ def test_detect_purchase_intent() -> None:
 
 def test_plan_order_status() -> None:
     calls = plan_transactional_tools(
-        {"messages": [{"role": "user", "content": "What is my order status ORD-DEMO-001?"}]}
+        {"messages": [
+            {"role": "user", "content": "What is my order status ORD-DEMO-001?"}]}
     )
     assert calls[0].name == "get_order_status"
+
+
+def test_plan_troubleshooting_search() -> None:
+    calls = plan_transactional_tools(
+        {
+            "messages": [{"role": "user", "content": "My fridge ice maker is not working"}],
+            "intent": "troubleshooting",
+            "appliance_type": "refrigerator",
+        }
+    )
+    assert calls[0].name == "search_parts"
+    assert calls[0].arguments["appliance_type"] == "refrigerator"

@@ -7,10 +7,21 @@ from typing import Literal
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
-from app.agents import nodes
+from app.agents import nodes, workers
 from app.agents.state import AgentState
+from app.agents.tool_router import plan_transactional_tools
 
 _compiled_graph = None
+
+WorkerRoute = Literal[
+    "clarification",
+    "product_search_worker",
+    "compatibility_worker",
+    "installation_worker",
+    "troubleshooting_worker",
+    "transaction_worker",
+    "order_status_worker",
+]
 
 
 def _route_after_input(state: AgentState) -> Literal["refusal", "supervisor"]:
@@ -19,10 +30,23 @@ def _route_after_input(state: AgentState) -> Literal["refusal", "supervisor"]:
     return "supervisor"
 
 
-def _route_after_supervisor(state: AgentState) -> Literal["clarification", "transactional_tools"]:
+def _route_after_supervisor(state: AgentState) -> WorkerRoute:
     if nodes.needs_clarification(state):
         return "clarification"
-    return "transactional_tools"
+
+    planned = plan_transactional_tools(state)
+    if planned and all(call.name == "get_order_status" for call in planned):
+        return "order_status_worker"
+
+    intent = state.get("intent") or "product_search"
+    by_intent: dict[str, WorkerRoute] = {
+        "product_search": "product_search_worker",
+        "compatibility": "compatibility_worker",
+        "installation": "installation_worker",
+        "troubleshooting": "troubleshooting_worker",
+        "transaction": "transaction_worker",
+    }
+    return by_intent.get(intent, "product_search_worker")
 
 
 def build_graph(*, checkpointer: BaseCheckpointSaver | None = None):
@@ -32,18 +56,31 @@ def build_graph(*, checkpointer: BaseCheckpointSaver | None = None):
     graph.add_node("refusal", nodes.refusal_node)
     graph.add_node("supervisor", nodes.supervisor_node)
     graph.add_node("clarification", nodes.clarification_node)
-    graph.add_node("transactional_tools", nodes.transactional_tools_node)
+    graph.add_node("product_search_worker", workers.product_search_worker_node)
+    graph.add_node("compatibility_worker", workers.compatibility_worker_node)
+    graph.add_node("installation_worker", workers.installation_worker_node)
+    graph.add_node("troubleshooting_worker",
+                   workers.troubleshooting_worker_node)
+    graph.add_node("transaction_worker", workers.transaction_worker_node)
+    graph.add_node("order_status_worker", workers.order_status_worker_node)
     graph.add_node("composer", nodes.composer_node)
     graph.add_node("output_guardrail", nodes.output_guardrail_node)
+    graph.add_node("suggest_follow_ups", nodes.suggest_follow_ups_node)
 
     graph.add_edge(START, "input_guardrail")
     graph.add_conditional_edges("input_guardrail", _route_after_input)
     graph.add_conditional_edges("supervisor", _route_after_supervisor)
-    graph.add_edge("refusal", END)
-    graph.add_edge("clarification", END)
-    graph.add_edge("transactional_tools", "composer")
+    graph.add_edge("refusal", "suggest_follow_ups")
+    graph.add_edge("clarification", "suggest_follow_ups")
+    graph.add_edge("product_search_worker", "composer")
+    graph.add_edge("compatibility_worker", "composer")
+    graph.add_edge("installation_worker", "composer")
+    graph.add_edge("troubleshooting_worker", "composer")
+    graph.add_edge("transaction_worker", "composer")
+    graph.add_edge("order_status_worker", "composer")
     graph.add_edge("composer", "output_guardrail")
-    graph.add_edge("output_guardrail", END)
+    graph.add_edge("output_guardrail", "suggest_follow_ups")
+    graph.add_edge("suggest_follow_ups", END)
 
     return graph.compile(checkpointer=checkpointer)
 

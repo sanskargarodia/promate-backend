@@ -11,11 +11,12 @@ from sqlalchemy import func, select
 from app.core.logging import configure_logging
 from app.db.init_schema import init_schema_sync
 from app.models.catalog import Part
-from ingestion.load import ensure_required_parts_loaded, load_manifest
+from ingestion.load import ensure_required_parts_loaded, load_manifest, load_parts_by_ps
 from ingestion.persist import SyncSession
 from ingestion.public_catalog import load_public_catalog
 from ingestion.scrape import ScrapeSettings, discover_urls, scrape_manifest
-from ingestion.seeds import regression_part_ps_numbers
+from ingestion.seeds import manifest_for_ps_numbers, regression_part_ps_numbers
+from ingestion.types import CrawlManifest
 
 
 async def _cmd_init_db(_: argparse.Namespace) -> None:
@@ -34,16 +35,35 @@ async def _cmd_import_catalog(args: argparse.Namespace) -> None:
     print(f"Imported public catalog: {counts}")
 
 
+def _scrape_settings(args: argparse.Namespace) -> ScrapeSettings:
+    return ScrapeSettings(
+        max_parts=args.max_parts,
+        max_category_pages=getattr(args, "max_category_pages", 200),
+        max_repair_help_pages=getattr(args, "max_repair_help_pages", 100),
+        headed=getattr(args, "headed", False),
+        use_public_catalog_urls=not getattr(args, "no_public_urls", False),
+        crawl_categories=not getattr(args, "no_crawl", False),
+    )
+
+
+def _manifest_for_args(args: argparse.Namespace) -> CrawlManifest | None:
+    if getattr(args, "ps", None):
+        return manifest_for_ps_numbers(args.ps)
+    return None
+
+
 async def _cmd_scrape(args: argparse.Namespace) -> None:
-    settings = ScrapeSettings(
-        max_parts=args.max_parts,
-        headed=args.headed,
-        use_public_catalog_urls=not args.no_public_urls,
-    )
-    manifest = await discover_urls(
-        max_parts=args.max_parts,
-        settings=settings,
-    )
+    settings = _scrape_settings(args)
+    ps_manifest = _manifest_for_args(args)
+    if ps_manifest is not None:
+        manifest = ps_manifest
+    else:
+        manifest = await discover_urls(
+            max_parts=args.max_parts,
+            settings=settings,
+            use_network=not args.cache_only,
+            cache_only=args.cache_only,
+        )
     await scrape_manifest(
         manifest,
         use_network=not args.cache_only,
@@ -52,15 +72,23 @@ async def _cmd_scrape(args: argparse.Namespace) -> None:
     )
     print(
         f"Scrape complete: {len(manifest.part_urls)} parts, "
-        f"{len(manifest.model_urls)} models in manifest."
+        f"{len(manifest.model_urls)} models, "
+        f"{len(manifest.repair_help_urls)} repair-help pages in manifest."
     )
 
 
 async def _cmd_load(args: argparse.Namespace) -> None:
-    settings = ScrapeSettings(max_parts=args.max_parts, use_public_catalog_urls=True)
+    if getattr(args, "ps", None):
+        counts = load_parts_by_ps(args.ps)
+        print(f"Part enrichment complete: {counts}")
+        return
+
+    settings = _scrape_settings(args)
     manifest = await discover_urls(
         max_parts=args.max_parts,
         settings=settings,
+        use_network=False,
+        cache_only=True,
     )
     counts = load_manifest(manifest)
     print(f"Cache enrichment complete: {counts}")
@@ -113,7 +141,8 @@ def main() -> None:
         "import-catalog",
         help="Load ~7k fridge/dishwasher parts from public scraped CSV (primary catalog source)",
     )
-    import_p.add_argument("--csv-url", default=None, help="Override public CSV URL")
+    import_p.add_argument("--csv-url", default=None,
+                          help="Override public CSV URL")
     import_p.add_argument(
         "--skip-embeddings",
         action="store_true",
@@ -125,24 +154,47 @@ def main() -> None:
         help="Skip part↔model compatibility links (faster; use for smoke tests only)",
     )
 
-    scrape_p = sub.add_parser("scrape", help="Discover + cache PartSelect HTML")
+    scrape_p = sub.add_parser(
+        "scrape", help="Discover + cache PartSelect HTML")
     scrape_p.add_argument("--max-parts", type=int, default=10_000)
+    scrape_p.add_argument("--max-category-pages", type=int, default=200)
+    scrape_p.add_argument("--max-repair-help-pages", type=int, default=100)
     scrape_p.add_argument("--cache-only", action="store_true")
-    scrape_p.add_argument("--headed", action="store_true", help="Visible browser (bot bypass)")
+    scrape_p.add_argument("--headed", action="store_true",
+                          help="Visible browser (bot bypass)")
     scrape_p.add_argument(
         "--no-public-urls",
         action="store_true",
         help="Do not seed manifest from public catalog export",
     )
+    scrape_p.add_argument(
+        "--no-crawl",
+        action="store_true",
+        help="Skip category/repair-help BFS discovery (CSV + seeds only)",
+    )
+    scrape_p.add_argument(
+        "--ps",
+        action="append",
+        metavar="PS_NUMBER",
+        help="Scrape only these part numbers (repeatable)",
+    )
 
     load_p = sub.add_parser("load", help="Enrich DB rows from cached HTML")
     load_p.add_argument("--max-parts", type=int, default=10_000)
+    load_p.add_argument(
+        "--ps",
+        action="append",
+        metavar="PS_NUMBER",
+        help="Re-enrich install stories for specific parts, e.g. --ps PS11752778",
+    )
 
     run_p = sub.add_parser(
         "run",
         help="import-catalog + scrape + load (recommended full pipeline)",
     )
     run_p.add_argument("--max-parts", type=int, default=10_000)
+    run_p.add_argument("--max-category-pages", type=int, default=200)
+    run_p.add_argument("--max-repair-help-pages", type=int, default=100)
     run_p.add_argument("--cache-only", action="store_true")
     run_p.add_argument("--headed", action="store_true")
     run_p.add_argument("--skip-embeddings", action="store_true")
@@ -151,9 +203,16 @@ def main() -> None:
         action="store_true",
         help="Skip part↔model compatibility during catalog import",
     )
-    run_p.add_argument("--skip-scrape", action="store_true", help="Skip live HTML scrape")
-    run_p.add_argument("--skip-cache-load", action="store_true", help="Skip HTML enrichment")
+    run_p.add_argument("--skip-scrape", action="store_true",
+                       help="Skip live HTML scrape")
+    run_p.add_argument("--skip-cache-load",
+                       action="store_true", help="Skip HTML enrichment")
     run_p.add_argument("--no-public-urls", action="store_true")
+    run_p.add_argument(
+        "--no-crawl",
+        action="store_true",
+        help="Skip category/repair-help BFS during discovery",
+    )
 
     args = parser.parse_args()
     configure_logging(args.log_level)

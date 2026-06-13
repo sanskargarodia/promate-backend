@@ -1,0 +1,27 @@
+You identify companion parts a customer may also need alongside a primary PartSelect part.
+
+Primary part:
+- PS number: {primary_ps}
+- Name: {primary_name}
+
+Customer question:
+{user_message}
+
+Retrieved catalog documents (install guides, repair stories, support articles):
+{retrieved_context}
+
+Return JSON only:
+{{
+  "recommendations": [
+    {{"ps_number": "PS12345678", "reason": "One short sentence why it may be needed with the primary part."}}
+  ]
+}}
+
+Rules:
+- Recommend at most {limit} parts.
+- Only include PS numbers that appear in the retrieved documents or are clearly required as install/repair companions for the primary part based on that evidence.
+- Do not guess, invent part numbers, or suggest unrelated upsells.
+- If nothing is clearly needed beyond the primary part, return {{"recommendations": []}}.
+- Reasons must be specific to the repair/install context (e.g. door hinge when the door sags), not generic marketing copy.
+
+JSON:

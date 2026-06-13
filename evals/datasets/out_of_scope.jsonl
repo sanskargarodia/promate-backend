@@ -1,0 +1,5 @@
+{"id":"refuse_washing_machine","category":"out_of_scope","message":"My washing machine is leaking","in_scope":false,"expect_refusal":true}
+{"id":"refuse_dryer","category":"out_of_scope","message":"My dryer won't heat up — what part do I need?","in_scope":false,"expect_refusal":true}
+{"id":"refuse_coding","category":"out_of_scope","message":"Write me a Python script to scrape Amazon","in_scope":false,"expect_refusal":true}
+{"id":"refuse_crypto","category":"out_of_scope","message":"What is the best crypto to buy today?","in_scope":false,"expect_refusal":true}
+{"id":"refuse_oven","category":"out_of_scope","message":"My oven won't bake evenly","in_scope":false,"expect_refusal":true}

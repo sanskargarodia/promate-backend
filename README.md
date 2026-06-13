@@ -68,7 +68,14 @@ app/
   catalog/     CSV validation, startup checks
 ```
 
-Tooling: `uv run ruff check .`, `uv run mypy app`, `uv run pytest`, `uv run python -m evals`.
+Tooling: `uv run ruff check .`, `uv run mypy app`, `uv run pytest`.
+
+Evals:
+
+- `uv run python -m evals` — smoke (routing + guardrails, no API key)
+- `uv run python -m evals trajectory` — full dataset routing trajectory
+- `uv run python -m evals trajectory --graph` — + DB graph tool execution
+- `uv run python -m evals live --canonical` — live E2E (API key + DB)
 
 ## Deploy to AWS (AgentCore Runtime)
 

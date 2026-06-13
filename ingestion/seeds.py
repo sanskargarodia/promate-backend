@@ -39,6 +39,17 @@ def category_root_urls() -> list[str]:
     ]
 
 
+def repair_help_root_urls() -> list[str]:
+    seeds = load_catalog_seeds()
+    roots = seeds.get("repair_help_roots", [])
+    if isinstance(roots, list) and roots:
+        return [str(u) for u in roots]
+    return [
+        f"{BASE_URL}/Repair/Refrigerator/",
+        f"{BASE_URL}/Repair/Dishwasher/",
+    ]
+
+
 def normalize_part_url(url: str) -> str | None:
     match = re.search(r"PS(\d+)", url, re.I)
     if not match:
@@ -50,12 +61,24 @@ def merge_manifests(*manifests: CrawlManifest) -> CrawlManifest:
     parts: set[str] = set()
     models: set[str] = set()
     categories: set[str] = set()
+    repair_help: set[str] = set()
     for manifest in manifests:
         parts.update(manifest.part_urls)
         models.update(manifest.model_urls)
         categories.update(manifest.category_urls)
+        repair_help.update(manifest.repair_help_urls)
     return CrawlManifest(
         part_urls=sorted(parts),
         model_urls=sorted(models),
         category_urls=sorted(categories),
+        repair_help_urls=sorted(repair_help),
     )
+
+
+def manifest_for_ps_numbers(ps_numbers: list[str]) -> CrawlManifest:
+    part_urls = []
+    for raw in ps_numbers:
+        normalized = normalize_part_url(raw.strip())
+        if normalized:
+            part_urls.append(normalized)
+    return CrawlManifest(part_urls=sorted(set(part_urls)))

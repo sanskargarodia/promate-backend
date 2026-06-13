@@ -18,6 +18,7 @@ class PartResult(BaseModel):
     rating: float | None = None
     rating_count: int | None = None
     source_url: str | None = None
+    recommendation_reason: str | None = None
 
 
 class CompatibilityResult(BaseModel):

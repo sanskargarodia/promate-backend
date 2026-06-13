@@ -31,10 +31,13 @@ USER_AGENT = (
 @dataclass
 class ScrapeSettings:
     max_parts: int = 10_000
+    max_category_pages: int = 200
+    max_repair_help_pages: int = 100
     delay_min: float = 1.0
     delay_max: float = 2.5
     headed: bool = False
     use_public_catalog_urls: bool = True
+    crawl_categories: bool = True
 
 
 @dataclass
@@ -55,7 +58,8 @@ class BrowserSession:
             "headless": not self.headed,
             "args": ["--disable-blink-features=AutomationControlled"],
         }
-        self._browser = await self._playwright.chromium.launch(**launch_kwargs)  # type: ignore[union-attr]
+        # type: ignore[union-attr]
+        self._browser = await self._playwright.chromium.launch(**launch_kwargs)
         self._context = await self._browser.new_context(  # type: ignore[union-attr]
             user_agent=USER_AGENT,
             locale="en-US",
@@ -146,7 +150,8 @@ async def fetch_page(
         write_cached(url, html, kind=kind)
         return html
 
-    logger.warning("Blocked or failed fetch for %s — use cache or import-catalog", url)
+    logger.warning(
+        "Blocked or failed fetch for %s — use cache or import-catalog", url)
     return None
 
 
@@ -179,8 +184,12 @@ async def discover_urls(
     *,
     max_parts: int = 10_000,
     settings: ScrapeSettings | None = None,
+    use_network: bool = True,
+    cache_only: bool = False,
 ) -> CrawlManifest:
-    """Part URLs from public CSV export + regression anchors (no listing crawl)."""
+    """Discover part, model, category, and repair-help URLs for a crawl run."""
+    from ingestion.discover import crawl_category_tree, enrich_models_from_cached_parts
+
     cfg = settings or ScrapeSettings(max_parts=max_parts)
     cfg.max_parts = max_parts
 
@@ -192,12 +201,27 @@ async def discover_urls(
         except Exception as exc:  # noqa: BLE001
             logger.error("Public catalog URL export failed: %s", exc)
 
+    if cfg.crawl_categories:
+        try:
+            crawled = await crawl_category_tree(
+                max_category_pages=cfg.max_category_pages,
+                max_repair_help_pages=cfg.max_repair_help_pages,
+                settings=cfg,
+                use_network=use_network,
+                cache_only=cache_only,
+            )
+            manifests.append(crawled)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Category/repair-help crawl failed: %s", exc)
+
     merged = merge_manifests(*manifests)
     merged.part_urls = sorted(set(merged.part_urls))[:max_parts]
+    merged = enrich_models_from_cached_parts(merged)
     logger.info(
-        "Discovery complete: %s part URLs, %s model URLs",
+        "Discovery complete: %s part URLs, %s model URLs, %s repair-help URLs",
         len(merged.part_urls),
         len(merged.model_urls),
+        len(merged.repair_help_urls),
     )
     return merged
 
@@ -214,28 +238,33 @@ async def scrape_manifest(
     cfg = settings or ScrapeSettings()
     sem = asyncio.Semaphore(max(1, min(concurrency, 2)))
 
-    if cache_only or not use_network:
-        for url in manifest.part_urls:
-            await fetch_page(url, kind="parts", cache_only=True)
-        for url in manifest.model_urls:
-            await fetch_page(url, kind="models", cache_only=True)
-        return manifest
-
-    async with BrowserSession(headed=cfg.headed) as browser:
-
-        async def scrape_one(url: str, kind: str) -> None:
+    async def scrape_batch(urls: list[str], kind: str, browser: BrowserSession | None) -> None:
+        async def scrape_one(url: str) -> None:
             async with sem:
                 await fetch_page(
                     url,
                     kind=kind,
+                    use_network=use_network,
+                    cache_only=cache_only,
                     browser=browser,
                     settings=cfg,
                 )
                 await asyncio.sleep(random.uniform(cfg.delay_min, cfg.delay_max))
 
-        for url in manifest.part_urls:
-            await scrape_one(url, "parts")
-        for url in manifest.model_urls:
-            await scrape_one(url, "models")
+        for url in urls:
+            await scrape_one(url)
+
+    if cache_only or not use_network:
+        await scrape_batch(manifest.part_urls, "parts", None)
+        await scrape_batch(manifest.model_urls, "models", None)
+        await scrape_batch(manifest.category_urls, "categories", None)
+        await scrape_batch(manifest.repair_help_urls, "repair_help", None)
+        return manifest
+
+    async with BrowserSession(headed=cfg.headed) as browser:
+        await scrape_batch(manifest.part_urls, "parts", browser)
+        await scrape_batch(manifest.model_urls, "models", browser)
+        await scrape_batch(manifest.category_urls, "categories", browser)
+        await scrape_batch(manifest.repair_help_urls, "repair_help", browser)
 
     return manifest
