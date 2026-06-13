@@ -3,28 +3,37 @@
 from __future__ import annotations
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg import AsyncConnection
 from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import settings
 
 _checkpointer: AsyncPostgresSaver | None = None
-_connection: AsyncConnection | None = None
+_pool: AsyncConnectionPool | None = None
 
 
 async def init_checkpointer() -> AsyncPostgresSaver:
     """Create checkpoint tables and return a process-wide saver."""
-    global _checkpointer, _connection
+    global _checkpointer, _pool
     if _checkpointer is not None:
         return _checkpointer
 
-    _connection = await AsyncConnection.connect(
-        settings.database_url_sync,
-        autocommit=True,
-        prepare_threshold=0,
-        row_factory=dict_row,
+    _pool = AsyncConnectionPool(
+        conninfo=settings.database_url_sync,
+        kwargs={
+            "autocommit": True,
+            "prepare_threshold": 0,
+            "row_factory": dict_row,
+        },
+        min_size=1,
+        max_size=4,
+        check=AsyncConnectionPool.check_connection,
+        open=False,
     )
-    _checkpointer = AsyncPostgresSaver(conn=_connection)
+    await _pool.open()
+    await _pool.wait()
+
+    _checkpointer = AsyncPostgresSaver(conn=_pool)
     try:
         await _checkpointer.setup()
     except Exception as exc:
@@ -36,11 +45,11 @@ async def init_checkpointer() -> AsyncPostgresSaver:
 
 
 async def close_checkpointer() -> None:
-    global _checkpointer, _connection
+    global _checkpointer, _pool
     _checkpointer = None
-    if _connection is not None:
-        await _connection.close()
-        _connection = None
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
 
 
 def get_checkpointer() -> AsyncPostgresSaver | None:

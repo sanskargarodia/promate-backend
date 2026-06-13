@@ -224,17 +224,17 @@ Enable [AgentCore observability](https://docs.aws.amazon.com/bedrock-agentcore/l
 
 ## Troubleshooting
 
-| Symptom                          | Fix                                                                                                    |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Catalog not ready                | Run `import-catalog` against Aurora; check `DATABASE_URL` env on runtime                               |
-| Permission denied                | Verify IAM policies for deploy + `bedrock-agentcore:InvokeAgentRuntime`                                |
-| `codebuild:CreateProject` denied | GitHub secrets use invoke-only user; attach `deploy/github-actions-iam-policy.json` or use deploy user |
-| Connection refused (DB)          | Security groups / VPC — runtime must reach Aurora                                                      |
-| SSL / unexpected eof (DB)        | Add `?sslmode=require` to Aurora URLs (auto-applied in `config.py` for `*.rds.amazonaws.com`)          |
-| Runtime env wiped                | Never run bare `agentcore deploy` — always pass `--env` flags (see `deploy-agentcore.sh`)              |
-| Model / embedding errors         | Enable Bedrock model access in console; match `EMBEDDING_DIM` to vectors                               |
-| Package too large (>250 MB)      | Re-run export with extra `--prune` flags, or switch to container deploy (toolkit generates Dockerfile) |
-| Port 8080 in use (local)         | Stop other AgentCore local processes                                                                   |
+| Symptom                          | Fix                                                                                                                                                                                                                                                                                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Catalog not ready                | Run `import-catalog` against Aurora; check `DATABASE_URL` env on runtime                                                                                                                                                                                                                                    |
+| Permission denied                | Verify IAM policies for deploy + `bedrock-agentcore:InvokeAgentRuntime`                                                                                                                                                                                                                                     |
+| `codebuild:CreateProject` denied | GitHub secrets use invoke-only user; attach `deploy/github-actions-iam-policy.json` or use deploy user                                                                                                                                                                                                      |
+| Connection refused (DB)          | Security groups / VPC — runtime must reach Aurora                                                                                                                                                                                                                                                           |
+| SSL / unexpected eof (DB)        | Aurora requires TLS. Ensure `DATABASE_URL` / `DATABASE_URL_SYNC` use `?sslmode=require` (auto-applied for AWS hosts in `config.py`). Redeploy with `deploy-agentcore.sh` so env vars are not wiped. If `DATABASE_URL_SYNC` was copied from `DATABASE_URL`, the `+psycopg` prefix is stripped automatically. |
+| Runtime env wiped                | Never run bare `agentcore deploy` — always pass `--env` flags (see `deploy-agentcore.sh`)                                                                                                                                                                                                                   |
+| Model / embedding errors         | Enable Bedrock model access in console; match `EMBEDDING_DIM` to vectors                                                                                                                                                                                                                                    |
+| Package too large (>250 MB)      | Re-run export with extra `--prune` flags, or switch to container deploy (toolkit generates Dockerfile)                                                                                                                                                                                                      |
+| Port 8080 in use (local)         | Stop other AgentCore local processes                                                                                                                                                                                                                                                                        |
 
 ## Cleanup
 
