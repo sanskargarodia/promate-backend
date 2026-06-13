@@ -12,3 +12,6 @@ ingestion/cache
 .mypy_cache
 node_modules
 *.md
+deploy/aurora-credentials.json
+deploy/env.agentcore.local
+deploy/env.agentcore.*
