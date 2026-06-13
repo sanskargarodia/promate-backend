@@ -46,16 +46,27 @@ def main() -> None:
         print(text, end="", flush=True)
     print()
 
-    # AgentCore streams SSE lines: data: {...}\n\n
     combined = "".join(chunks)
+    saw_done = False
+    saw_error = False
     for line in combined.splitlines():
         if line.startswith("data: "):
             try:
                 event = json.loads(line.removeprefix("data: ").strip())
-                if event.get("type") == "done":
-                    break
             except json.JSONDecodeError:
                 continue
+            if event.get("type") == "error":
+                saw_error = True
+            if event.get("type") == "done":
+                saw_done = True
+                break
+
+    if saw_error:
+        print("Smoke test failed: agent returned an error event.", file=sys.stderr)
+        sys.exit(1)
+    if not saw_done:
+        print("Smoke test failed: agent stream did not complete.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

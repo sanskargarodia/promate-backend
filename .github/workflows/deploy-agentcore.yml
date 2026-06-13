@@ -1,0 +1,66 @@
+name: Deploy AgentCore
+
+on:
+  push:
+    branches:
+      - feature/agentcore-runtime
+      - main
+    paths:
+      - "app/**"
+      - "requirements.txt"
+      - "Dockerfile"
+      - "deploy/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/deploy-agentcore.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: agentcore-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy AgentCore runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Deploy to AgentCore
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+          AWS_REGION: us-east-1
+          APP_ENV: production
+          LOG_LEVEL: INFO
+          EMBEDDINGS_PROVIDER: fastembed
+          FASTEMBED_MODEL: BAAI/bge-small-en-v1.5
+          EMBEDDING_DIM: "384"
+          ANTHROPIC_MODEL_ID: claude-sonnet-4-6
+          ANTHROPIC_GUARDRAIL_MODEL_ID: claude-haiku-4-5
+        run: bash deploy/deploy-agentcore.sh
+
+      - name: Smoke test deployed runtime
+        env:
+          AGENT_RUNTIME_ARN: arn:aws:bedrock-agentcore:us-east-1:211125453575:runtime/app_agent_core_entrypoint-PGre0T4zQL
+          AWS_REGION: us-east-1
+        run: uv run python deploy/invoke_agent.py "Will PS11752778 fit model WDT780SAEM1?"

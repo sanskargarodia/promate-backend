@@ -98,11 +98,51 @@ checkpointer**, not AgentCore Memory.
 
 ## Step 3 — Deploy
 
+**Manual (local):**
+
 ```powershell
-agentcore deploy --env-file deploy/env.agentcore.local
+# PowerShell — always pass runtime env vars; bare `agentcore deploy` wipes them.
+$env:AGENTCORE_SUPPRESS_RECOMMENDATION = "1"
+$env:PYTHONIOENCODING = "utf-8"
+$env:NO_COLOR = "1"
+Copy-Item deploy\bedrock_agentcore.yaml .bedrock_agentcore.yaml
+$envArgs = @()
+Get-Content deploy\env.agentcore.local | ForEach-Object {
+  $line = $_.Trim()
+  if ($line -and -not $line.StartsWith('#') -and $line -match '^([^=]+)=(.*)$') {
+    $envArgs += "--env"; $envArgs += ($matches[1] + '=' + $matches[2])
+  }
+}
+agentcore deploy @envArgs
 ```
 
-Or inline:
+**Linux / CI:**
+
+```bash
+# Export env from deploy/env.agentcore.local, then:
+bash deploy/deploy-agentcore.sh
+```
+
+**GitHub Actions (automatic on push):**
+
+Workflow: `.github/workflows/deploy-agentcore.yml`
+
+Triggers on push to `feature/agentcore-runtime` or `main` when agent/runtime files change.
+Runs CodeBuild container deploy + smoke test.
+
+Add these **repository secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Description |
+| ------ | ----------- |
+| `AWS_ACCESS_KEY_ID` | IAM user/role with AgentCore deploy + CodeBuild permissions |
+| `AWS_SECRET_ACCESS_KEY` | Matching secret key |
+| `ANTHROPIC_API_KEY` | Agent LLM API key |
+| `DATABASE_URL` | Aurora async URL (`postgresql+psycopg://...?sslmode=require`) |
+| `DATABASE_URL_SYNC` | Aurora sync URL for LangGraph checkpointer |
+
+Non-secret runtime defaults (region, embeddings, log level) are set in the workflow file.
+
+Or inline (one-off):
 
 ```powershell
 agentcore deploy `
@@ -177,6 +217,8 @@ Enable [AgentCore observability](https://docs.aws.amazon.com/bedrock-agentcore/l
 | Catalog not ready           | Run `import-catalog` against Aurora; check `DATABASE_URL` env on runtime                               |
 | Permission denied           | Verify IAM policies for deploy + `bedrock-agentcore:InvokeAgentRuntime`                                |
 | Connection refused (DB)     | Security groups / VPC — runtime must reach Aurora                                                      |
+| SSL / unexpected eof (DB)   | Add `?sslmode=require` to Aurora URLs (auto-applied in `config.py` for `*.rds.amazonaws.com`)        |
+| Runtime env wiped           | Never run bare `agentcore deploy` — always pass `--env` flags (see `deploy-agentcore.sh`)            |
 | Model / embedding errors    | Enable Bedrock model access in console; match `EMBEDDING_DIM` to vectors                               |
 | Package too large (>250 MB) | Re-run export with extra `--prune` flags, or switch to container deploy (toolkit generates Dockerfile) |
 | Port 8080 in use (local)    | Stop other AgentCore local processes                                                                   |
@@ -191,7 +233,9 @@ agentcore destroy
 
 | File                              | Purpose                                      |
 | --------------------------------- | -------------------------------------------- |
-| `env.agentcore.example`           | Template env vars for `--env-file`           |
+| `env.agentcore.example`           | Template env vars for runtime                |
+| `bedrock_agentcore.yaml`          | Committed AgentCore toolkit config (CI-safe) |
+| `deploy-agentcore.sh`             | Deploy script for CI and local bash          |
 | `export-requirements.ps1` / `.sh` | Regenerate `requirements.txt` from `uv.lock` |
 | `invoke_agent.py`                 | Post-deploy boto3 smoke test                 |
 

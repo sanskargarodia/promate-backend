@@ -229,4 +229,5 @@ deploy/aurora-credentials.json
 deploy/aurora-infra.json
 deploy/env.agentcore.local
 .bedrock_agentcore.yaml
+.bedrock_agentcore/
 .agentcore_identity_*.env
