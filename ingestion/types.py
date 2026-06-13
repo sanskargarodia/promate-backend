@@ -53,9 +53,20 @@ class ScrapedDocument(BaseModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class CategoryDiscovery(BaseModel):
+    """URLs extracted from a single category or repair-help listing page."""
+
+    part_urls: list[str] = Field(default_factory=list)
+    model_urls: list[str] = Field(default_factory=list)
+    category_urls: list[str] = Field(default_factory=list)
+    repair_help_urls: list[str] = Field(default_factory=list)
+    pagination_urls: list[str] = Field(default_factory=list)
+
+
 class CrawlManifest(BaseModel):
     """URLs discovered or required for a crawl run."""
 
     part_urls: list[str] = Field(default_factory=list)
     model_urls: list[str] = Field(default_factory=list)
     category_urls: list[str] = Field(default_factory=list)
+    repair_help_urls: list[str] = Field(default_factory=list)

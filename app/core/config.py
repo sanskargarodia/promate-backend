@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # ── App ──────────────────────────────────────────────────────────────────
     app_env: str = "local"
     log_level: str = "INFO"
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3001, http://localhost:3000"
 
     # ── LLM (app/core/llm.py) ────────────────────────────────────────────────
     # The agent's LLM is ALWAYS the Anthropic API — both locally and when the
@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     embeddings_provider: str = "fastembed"
     fastembed_model: str = "BAAI/bge-small-en-v1.5"
     bedrock_embeddings_model_id: str = "amazon.titan-embed-text-v2:0"
-    embedding_dim: int = 384  # bge-small = 384; Titan v2 = 1024 — pgvector column must match
+    # bge-small = 384; Titan v2 = 1024 — pgvector column must match
+    embedding_dim: int = 384
 
     # ── Database ─────────────────────────────────────────────────────────────
     database_url: str = "postgresql+psycopg://promate:promate@localhost:5433/promate"

@@ -8,6 +8,7 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from app.agents.transaction_state import TransactionPhase
+from app.guardrails.refusal import RefusalCode
 
 Intent = Literal[
     "product_search",
@@ -20,9 +21,19 @@ Intent = Literal[
 ]
 
 
+class SessionContext(TypedDict, total=False):
+    active_intent: Intent
+    symptom_summary: str
+    appliance_type: str
+    brand: str
+    ps_number: str
+    model_number: str
+
+
 class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     intent: Intent
+    session_context: SessionContext
     ps_number: str | None
     model_number: str | None
     appliance_type: str | None
@@ -35,5 +46,7 @@ class AgentState(TypedDict, total=False):
     allowed_ps_numbers: list[str]
     catalog_grounded: bool
     guardrail_notes: list[str]
+    refusal_code: RefusalCode
     final_response: str
     refused: bool
+    suggested_follow_ups: list[str]

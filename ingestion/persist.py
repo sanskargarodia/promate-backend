@@ -22,11 +22,13 @@ from ingestion.types import ScrapedDocument, ScrapedPart
 
 logger = logging.getLogger(__name__)
 
-sync_engine = create_engine(settings.sqlalchemy_sync_database_url, pool_pre_ping=True)
+sync_engine = create_engine(
+    settings.sqlalchemy_sync_database_url, pool_pre_ping=True)
 SyncSession = sessionmaker(sync_engine, expire_on_commit=False)
 
 # Scrape requests often use short /PS123.htm URLs; CSV product_url has the canonical slug.
-_SHORT_PARTSELECT_URL = re.compile(r"^https://www\.partselect\.com/PS\d+\.htm/?$", re.I)
+_SHORT_PARTSELECT_URL = re.compile(
+    r"^https://www\.partselect\.com/PS\d+\.htm/?$", re.I)
 
 
 def _pick_source_url(existing: str | None, incoming: str) -> str:
@@ -185,7 +187,8 @@ def upsert_symptoms(session: Session, part: ScrapedPart) -> None:
             )
         )
         if link is None:
-            session.add(PartSymptom(part_ps_number=part.ps_number, symptom_id=symptom.id))
+            session.add(PartSymptom(
+                part_ps_number=part.ps_number, symptom_id=symptom.id))
 
 
 def clear_install_guide_documents(session: Session, part_ps_number: str) -> None:
@@ -198,13 +201,22 @@ def clear_install_guide_documents(session: Session, part_ps_number: str) -> None
 
 
 def upsert_document(session: Session, doc: ScrapedDocument, vector: list[float]) -> None:
-    existing = session.scalar(
-        select(Document).where(
-            Document.part_ps_number == doc.part_ps_number,
-            Document.doc_type == doc.doc_type,
-            Document.title == doc.title,
+    existing = None
+    if doc.source_url:
+        existing = session.scalar(
+            select(Document).where(
+                Document.doc_type == doc.doc_type,
+                Document.source_url == doc.source_url,
+            )
         )
-    )
+    if existing is None and doc.part_ps_number:
+        existing = session.scalar(
+            select(Document).where(
+                Document.part_ps_number == doc.part_ps_number,
+                Document.doc_type == doc.doc_type,
+                Document.title == doc.title,
+            )
+        )
     if existing is None:
         existing = Document(
             doc_type=doc.doc_type,
@@ -213,8 +225,10 @@ def upsert_document(session: Session, doc: ScrapedDocument, vector: list[float])
         )
         session.add(existing)
 
+    existing.title = doc.title
     existing.content = doc.content
     existing.embedding = vector
+    existing.part_ps_number = doc.part_ps_number
     existing.model_number = doc.model_number
     existing.source_url = doc.source_url
     existing.metadata_ = doc.metadata
@@ -252,6 +266,7 @@ def persist_scraped_part(
     if embedder is not None and docs:
         if any(d.doc_type == "install_guide" for d in docs):
             clear_install_guide_documents(session, part.ps_number)
-        vectors = embedder.embed_documents([d.content for d in docs])  # type: ignore[attr-defined]
+        vectors = embedder.embed_documents(
+            [d.content for d in docs])  # type: ignore[attr-defined]
         for doc, vector in zip(docs, vectors, strict=True):
             upsert_document(session, doc, vector)

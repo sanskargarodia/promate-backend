@@ -10,22 +10,35 @@ from langchain_core.messages import HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.graph import get_compiled_graph
-from app.schemas.catalog import PartResult
+from app.agents.product_cards import select_product_cards
 
 
-def _part_dict_to_card(item: dict[str, object]) -> dict[str, object]:
-    return PartResult.model_validate(
-        {
-            "ps_number": item.get("part_id") or item.get("ps_number"),
-            "name": item.get("name", ""),
-            "brand": item.get("brand"),
-            "appliance_type": item.get("appliance_type", "refrigerator"),
-            "price_cents": item.get("price_cents"),
-            "in_stock": item.get("in_stock", False),
-            "image_urls": item.get("image_urls") or [],
-            "source_url": item.get("source_url"),
-        }
-    ).model_dump()
+def _yield_result_events(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build terminal SSE events from the final graph state."""
+    events: list[dict[str, Any]] = []
+
+    for handoff in result.get("purchase_handoffs") or []:
+        if isinstance(handoff, dict) and handoff.get("action") == "purchase_handoff":
+            events.append({"type": "purchase_handoff", **handoff})
+
+    final = result.get("final_response") or ""
+    if final:
+        events.append({"type": "token", "content": final})
+
+    for card in select_product_cards(result):
+        events.append(
+            {
+                "type": "product_card",
+                "part": card["part"],
+                "card_role": card["card_role"],
+            }
+        )
+
+    follow_ups = result.get("suggested_follow_ups") or []
+    if follow_ups:
+        events.append({"type": "suggestions", "prompts": list(follow_ups)})
+
+    return events
 
 
 async def run_agent_turn(
@@ -45,39 +58,22 @@ async def run_agent_turn(
     }
 
     yield {"type": "session", "thread_id": tid}
+    yield {"type": "status", "message": "Starting…"}
 
-    result = await graph.ainvoke(
+    result: dict[str, Any] = {}
+    async for mode, chunk in graph.astream(
         {"messages": [HumanMessage(content=message)]},
         config=config,
-    )
+        stream_mode=["custom", "values"],
+    ):
+        if mode == "custom" and isinstance(chunk, dict):
+            status_message = chunk.get("message")
+            if status_message:
+                yield {"type": "status", "message": str(status_message)}
+        elif mode == "values" and isinstance(chunk, dict):
+            result = chunk
 
-    for handoff in result.get("purchase_handoffs") or []:
-        if isinstance(handoff, dict) and handoff.get("action") == "purchase_handoff":
-            yield {"type": "purchase_handoff", **handoff}
-
-    final = result.get("final_response") or ""
-    if final:
-        yield {"type": "token", "content": final}
-
-    tool_payload = result.get("tool_payload") or {}
-    emitted: set[str] = set()
-
-    primary = tool_payload.get("part")
-    if isinstance(primary, dict) and primary.get("found", True):
-        card = _part_dict_to_card(primary)
-        emitted.add(str(card["ps_number"]))
-        yield {"type": "product_card", "part": card}
-
-    parts_raw = tool_payload.get("matching_parts") or tool_payload.get("parts")
-    if isinstance(parts_raw, list):
-        for item in parts_raw[:3]:
-            if not isinstance(item, dict):
-                continue
-            card = _part_dict_to_card(item)
-            ps = str(card["ps_number"])
-            if ps in emitted:
-                continue
-            emitted.add(ps)
-            yield {"type": "product_card", "part": card}
+    for event in _yield_result_events(result):
+        yield event
 
     yield {"type": "done"}

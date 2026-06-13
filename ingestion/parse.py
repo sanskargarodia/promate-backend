@@ -4,15 +4,28 @@ from __future__ import annotations
 
 import contextlib
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup, Tag
 
-from ingestion.types import RepairStory, ScrapedDocument, ScrapedModel, ScrapedPart
+from ingestion.types import (
+    CategoryDiscovery,
+    RepairStory,
+    ScrapedDocument,
+    ScrapedModel,
+    ScrapedPart,
+)
 
 BASE_URL = "https://www.partselect.com"
-PS_LINK_RE = re.compile(r"/PS(\d+)[^\"'\\s]*", re.I)
-MODEL_LINK_RE = re.compile(r"/Models/([^/\"'\\s]+)", re.I)
+PS_LINK_RE = re.compile(r"/PS(\d+)[^\"'\s]*", re.I)
+MODEL_LINK_RE = re.compile(r"/Models/([^/\"'\s]+)", re.I)
+CATEGORY_PARTS_RE = re.compile(r"/([A-Za-z0-9-]+-Parts\.htm)", re.I)
+REPAIR_HELP_RE = re.compile(
+    r"/Repair/(?:Refrigerator|Dishwasher)(?:/[^\"'\s>]*)?", re.I)
+OUT_OF_SCOPE_APPLIANCE_RE = re.compile(
+    r"(?:dryer|washer|range|stove|oven|microwave|dehumidifier|air[- ]conditioner)",
+    re.I,
+)
 
 INSTALL_TIME_MAP = {
     "less than 15 mins": 15,
@@ -75,6 +88,105 @@ def extract_model_urls(html: str) -> list[str]:
     return sorted(urls)
 
 
+def _in_scope_path(path: str) -> bool:
+    if OUT_OF_SCOPE_APPLIANCE_RE.search(path):
+        return False
+    lowered = path.lower()
+    return "refrigerator" in lowered or "dishwasher" in lowered or "fridge" in lowered
+
+
+def extract_category_urls(html: str) -> list[str]:
+    urls: set[str] = set()
+    for match in CATEGORY_PARTS_RE.finditer(html):
+        path = "/" + match.group(1)
+        if _in_scope_path(path):
+            urls.add(urljoin(BASE_URL, path))
+    return sorted(urls)
+
+
+def extract_repair_help_urls(html: str) -> list[str]:
+    urls: set[str] = set()
+    for match in REPAIR_HELP_RE.finditer(html):
+        path = match.group(0).split('"')[0].split("'")[0]
+        if _in_scope_path(path):
+            urls.add(urljoin(BASE_URL, path if path.endswith("/") else path + "/"))
+    for anchor in BeautifulSoup(html, "lxml").select('a[href*="/Repair/"]'):
+        href = anchor.get("href")
+        if not href:
+            continue
+        full = urljoin(BASE_URL, href)
+        path = urlparse(full).path
+        if "/Repair/" in path and _in_scope_path(path):
+            urls.add(full if full.endswith("/") else full + "/")
+    return sorted(urls)
+
+
+def extract_pagination_urls(html: str, *, current_url: str) -> list[str]:
+    base_path = urlparse(current_url).path
+    urls: set[str] = set()
+    for match in re.finditer(r'href="([^"]+)"', html):
+        full = urljoin(BASE_URL, match.group(1))
+        parsed = urlparse(full)
+        if parsed.path == base_path and parsed.query:
+            urls.add(full)
+    return sorted(urls)
+
+
+def discover_from_page(html: str, *, source_url: str) -> CategoryDiscovery:
+    """Extract crawlable URLs from a category or repair-help listing page."""
+    return CategoryDiscovery(
+        part_urls=extract_part_urls(html),
+        model_urls=extract_model_urls(html),
+        category_urls=extract_category_urls(html),
+        repair_help_urls=extract_repair_help_urls(html),
+        pagination_urls=extract_pagination_urls(html, current_url=source_url),
+    )
+
+
+def parse_repair_help_page(html: str, *, source_url: str) -> list[ScrapedDocument]:
+    """Parse a PartSelect repair-help article into troubleshooting documents."""
+    soup = BeautifulSoup(html, "lxml")
+    title_el = soup.select_one("h1") or soup.select_one(".title-lg")
+    title = _text(title_el) or "Repair help article"
+
+    appliance_type = _infer_appliance_type(title + source_url, source_url)
+
+    blocks: list[str] = []
+    main = soup.select_one("article") or soup.select_one(
+        ".content") or soup.select_one("main")
+    if main is not None:
+        for el in main.select("p, li"):
+            txt = el.get_text(" ", strip=True)
+            if len(txt) > 40:
+                blocks.append(txt)
+
+    if not blocks:
+        body_text = soup.get_text("\n", strip=True)
+        blocks = [line for line in body_text.splitlines() if len(line)
+                  > 60][:20]
+
+    if not blocks:
+        return []
+
+    content = "\n\n".join(blocks[:12])
+    linked_parts = [f"PS{m.group(1)}" for m in PS_LINK_RE.finditer(html)]
+    metadata: dict[str, object] = {
+        "appliance_type": appliance_type,
+        "linked_ps_numbers": sorted(set(linked_parts))[:20],
+    }
+
+    return [
+        ScrapedDocument(
+            doc_type="troubleshooting",
+            title=title,
+            content=content,
+            part_ps_number=None,
+            source_url=source_url,
+            metadata=metadata,
+        )
+    ]
+
+
 def parse_part_page(html: str, *, source_url: str) -> ScrapedPart:
     soup = BeautifulSoup(html, "lxml")
     title_el = soup.select_one("h1[itemprop=name]") or soup.select_one("h1")
@@ -95,7 +207,8 @@ def parse_part_page(html: str, *, source_url: str) -> ScrapedPart:
     brand_el = soup.select_one('[itemprop=brand] [itemprop=name]')
     desc_el = soup.select_one('[itemprop=description]')
 
-    in_stock = bool(soup.select_one('[itemprop=availability][content=InStock]'))
+    in_stock = bool(soup.select_one(
+        '[itemprop=availability][content=InStock]'))
     if not in_stock:
         in_stock = "in stock" in html.lower()
 
@@ -113,7 +226,8 @@ def parse_part_page(html: str, *, source_url: str) -> ScrapedPart:
 
     rating = None
     rating_count = None
-    rating_block = soup.select_one(".pd__cust-review__header__rating__chart--val")
+    rating_block = soup.select_one(
+        ".pd__cust-review__header__rating__chart--val")
     if rating_block and rating_block.get("data-rating"):
         with contextlib.suppress(ValueError):
             rating = float(rating_block["data-rating"])
@@ -160,7 +274,8 @@ def parse_part_page(html: str, *, source_url: str) -> ScrapedPart:
     repair = soup.select_one("#RepairStories")
     if repair:
         section = repair.find_parent(class_=re.compile("expanded|section"))
-        container = section if section is not None else repair.find_parent("div")
+        container = section if section is not None else repair.find_parent(
+            "div")
         if container:
             for idx, story in enumerate(container.select(".repair-story")[:5], start=1):
                 title_el = story.select_one(".repair-story__title")
@@ -169,12 +284,14 @@ def parse_part_page(html: str, *, source_url: str) -> ScrapedPart:
                 if body:
                     install_blocks.append(body)
                     repair_stories.append((story_title, body))
-    install_instructions = "\n\n---\n\n".join(install_blocks) if install_blocks else None
+    install_instructions = "\n\n---\n\n".join(
+        install_blocks) if install_blocks else None
 
     compatible_models: list[str] = []
     model_section = soup.select_one("#ModelCrossReference")
     if model_section:
-        parent = model_section.find_parent("div", class_=re.compile("expanded|section"))
+        parent = model_section.find_parent(
+            "div", class_=re.compile("expanded|section"))
         if parent:
             for row in parent.select("tr"):
                 cells = [c.get_text(strip=True) for c in row.select("td")]
@@ -285,7 +402,8 @@ def part_to_documents(part: ScrapedPart) -> list[ScrapedDocument]:
             )
     elif part.install_instructions:
         for idx, block in enumerate(
-            [b.strip() for b in part.install_instructions.split("\n\n---\n\n") if b.strip()],
+            [b.strip() for b in part.install_instructions.split(
+                "\n\n---\n\n") if b.strip()],
             start=1,
         ):
             docs.append(

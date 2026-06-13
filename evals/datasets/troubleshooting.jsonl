@@ -1,0 +1,5 @@
+{"id":"trouble_ice_maker","category":"troubleshooting","message":"The ice maker on my Whirlpool fridge is not working. How can I fix it?","expect_intent":"troubleshooting","expect_tools":["search_parts"]}
+{"id":"trouble_dishwasher_drain","category":"troubleshooting","message":"My dishwasher won't drain — what part might I need?","expect_intent":"troubleshooting","expect_tools":["search_parts"]}
+{"id":"trouble_vague_diagnose","category":"troubleshooting","message":"help me diagnose","expect_intent":"troubleshooting","expect_clarification":true}
+{"id":"trouble_refrigerator_noise","category":"troubleshooting","message":"My refrigerator is making weird noises","expect_intent":"troubleshooting","expect_tools":["search_parts"]}
+{"id":"trouble_leaking_fridge","category":"troubleshooting","message":"My fridge is leaking water on the floor","expect_intent":"troubleshooting","expect_tools":["search_parts"]}

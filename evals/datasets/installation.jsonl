@@ -1,0 +1,4 @@
+{"id":"install_ps_guide","category":"installation","message":"How can I install part number PS11752778?","expect_intent":"installation","expect_tools":["get_part_details"]}
+{"id":"install_how_replace","category":"installation","message":"How do I replace PS11752778 on my dishwasher?","expect_intent":"installation","expect_tools":["get_part_details"]}
+{"id":"install_missing_part","category":"installation","message":"How do I install the ice maker kit?","expect_intent":"installation","expect_clarification":true}
+{"id":"install_how_to_replace_phrase","category":"installation","message":"How to replace the door gasket PS11752778?","expect_intent":"installation","expect_tools":["get_part_details"]}

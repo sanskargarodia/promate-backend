@@ -36,7 +36,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # noqa: BLE001
         import logging
 
-        logging.getLogger(__name__).warning("Catalog validation skipped: %s", exc)
+        logging.getLogger(__name__).warning(
+            "Catalog validation skipped: %s", exc)
     try:
         checkpointer = await init_checkpointer()
         set_compiled_graph(build_graph(checkpointer=checkpointer))
@@ -55,7 +56,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="ProMate API",
     version="0.1.0",
-    description="PartSelect (refrigerator + dishwasher) chat-agent backend.",
+    description="PartSelect appliance parts chat-agent backend.",
     lifespan=lifespan,
 )
 

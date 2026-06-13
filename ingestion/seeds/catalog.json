@@ -6,5 +6,9 @@
   "category_roots": [
     "https://www.partselect.com/Refrigerator-Parts.htm",
     "https://www.partselect.com/Dishwasher-Parts.htm"
+  ],
+  "repair_help_roots": [
+    "https://www.partselect.com/Repair/Refrigerator/",
+    "https://www.partselect.com/Repair/Dishwasher/"
   ]
 }

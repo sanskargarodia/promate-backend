@@ -1,0 +1,6 @@
+{"id":"canonical_install","category":"canonical","message":"How can I install part PS11752778?","expect_intent":"installation","expect_tools":["get_part_details"],"expect_contains":["PS11752778"]}
+{"id":"canonical_compatibility","category":"canonical","message":"Is PS11752778 compatible with WDT780SAEM1?","expect_intent":"compatibility","expect_tools":["get_part_details"],"expect_contains":["PS11752778"]}
+{"id":"canonical_troubleshooting","category":"canonical","message":"Whirlpool ice maker not working","expect_intent":"troubleshooting","expect_tools":["search_parts"]}
+{"id":"canonical_purchase_handoff","category":"canonical","message":"I'm ready to buy PS11752778","expect_tools":["get_part_details","purchase_handoff"],"expect_events":["purchase_handoff"],"expect_contains":["PS11752778"]}
+{"id":"canonical_grounding_failure","category":"canonical","message":"Tell me about part PS99999999","expect_tools":["get_part_details"],"expect_grounding_failure":true,"expect_contains":["cannot find"]}
+{"id":"canonical_order_status","category":"canonical","message":"Status of order ORD-DEMO-001","expect_tools":["get_order_status"],"expect_contains":["ORD-DEMO-001"]}
