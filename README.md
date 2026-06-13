@@ -1,17 +1,28 @@
 # promate-backend
 
-FastAPI gateway + LangGraph agent for **ProMate**, the PartSelect (refrigerator +
-dishwasher) chat agent demo.
+FastAPI gateway + LangGraph agent for **ProMate**, the PartSelect (refrigerator and dishwasher) chat agent demo.
+
+**You do not need to run this backend repo to use ProMate.** The full application is hosted on AWS using Bedrock AgentCore and ECR. Simply open [promate-agent.vercel.app](https://promate-agent.vercel.app) and the frontend will route requests to the cloud backend. The first call after idle may take a little time while AgentCore activates the agent in the runtime.
 
 ## Quickstart (local)
+
+Only needed if you are developing or debugging the backend itself.
+
+**Turn on Docker Desktop** before starting Postgres (the `pgvector/pgvector:pg16` image).
 
 ```bash
 cp .env.example .env          # add ANTHROPIC_API_KEY
 uv sync                       # create .venv, install deps
-docker compose up -d postgres # Postgres 16 + pgvector
+docker compose up -d          # Postgres 16 + pgvector (requires Docker Desktop)
 uv run python -m ingestion init-db
 uv run python -m ingestion import-catalog   # if catalog empty
 uv run uvicorn app.main:app --reload   # http://localhost:8000
+```
+
+To run only Postgres while developing against a local uvicorn process:
+
+```bash
+docker compose up -d postgres
 ```
 
 **AgentCore Runtime (same graph, port 8080):**
@@ -24,14 +35,14 @@ uv run python -m app.agent_core_entrypoint
 
 Health checks:
 
-- `GET /health` — liveness (no deps)
-- `GET /api/v1/health` — readiness (includes DB ping)
+- `GET /health`: liveness (no deps)
+- `GET /api/v1/health`: readiness (includes DB ping)
 
 ## Demo conversation scripts
 
-Use these with `POST /api/v1/chat` or the frontend chat widget:
+Use these with `POST /api/v1/chat` or the frontend chat assistant:
 
-1. **Symptom → part:** `My dishwasher won't drain — what part might I need?`
+1. **Symptom → part:** `My dishwasher won't drain. What part might I need?`
 2. **Compatibility:** `Will PS11752778 fit model WDT780SAEM1?`
 3. **Install help:** `How can I install part PS11752778?`
 4. **Purchase handoff:** `I'm ready to buy PS11752778` → agent confirms grounded price/stock and links to PartSelect.com
@@ -72,10 +83,10 @@ Tooling: `uv run ruff check .`, `uv run mypy app`, `uv run pytest`.
 
 Evals:
 
-- `uv run python -m evals` — smoke (routing + guardrails, no API key)
-- `uv run python -m evals trajectory` — full dataset routing trajectory
-- `uv run python -m evals trajectory --graph` — + DB graph tool execution
-- `uv run python -m evals live --canonical` — live E2E (API key + DB)
+- `uv run python -m evals`: smoke (routing + guardrails, no API key)
+- `uv run python -m evals trajectory`: full dataset routing trajectory
+- `uv run python -m evals trajectory --graph`: + DB graph tool execution
+- `uv run python -m evals live --canonical`: live E2E (API key + DB)
 
 ## Deploy to AWS (AgentCore Runtime)
 
