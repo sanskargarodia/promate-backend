@@ -1,34 +1,33 @@
-# syntax=docker/dockerfile:1
-FROM python:3.11-slim AS base
+# Bedrock AgentCore Runtime image. Serves the ProMate agent on port 8080
+# (BedrockAgentCoreApp: /invocations + /ping) via app/agent_core_entrypoint.py.
+# Built for linux/arm64 by AgentCore CodeBuild. Runtime env (ANTHROPIC_API_KEY,
+# DATABASE_URL, ...) is injected at deploy time, never baked into the image.
+#
+# Base image is pulled from Amazon ECR Public (NOT Docker Hub) to avoid CodeBuild
+# hitting Docker Hub's anonymous pull rate limit (429 Too Many Requests).
+FROM public.ecr.aws/docker/library/python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    # Keep the venv OUTSIDE /app so a bind-mount of the repo (dev compose) can't
-    # shadow it with the host's platform-specific .venv.
-    UV_PROJECT_ENVIRONMENT=/opt/venv \
-    PATH="/opt/venv/bin:$PATH"
-
-# uv (fast, reproducible installs)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+    PYTHONUTF8=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
+# libgomp1 is required at runtime by onnxruntime (fastembed embeddings).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential curl \
+        build-essential libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Dependency layer (cached unless pyproject/lock change).
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --no-dev --no-install-project
+# Dependency layer (cached unless requirements change).
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
 
-# App layer.
+# Bake the embedding model into the image so cold starts don't download ~130MB.
+RUN python -c "from fastembed import TextEmbedding; list(TextEmbedding('BAAI/bge-small-en-v1.5').embed(['warmup']))"
+
 COPY . .
 
-# Non-root.
-RUN useradd -m appuser && chown -R appuser:appuser /app /opt/venv
-USER appuser
-
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8080
+CMD ["python", "-m", "app.agent_core_entrypoint"]

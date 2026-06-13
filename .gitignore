@@ -225,6 +225,8 @@ AGENT.md
 ingestion/cache/
 
 # AgentCore deploy (local secrets + toolkit state)
+deploy/aurora-credentials.json
+deploy/aurora-infra.json
 deploy/env.agentcore.local
 .bedrock_agentcore.yaml
 .agentcore_identity_*.env
