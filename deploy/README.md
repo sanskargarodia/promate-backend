@@ -132,13 +132,13 @@ Runs CodeBuild container deploy + smoke test.
 
 Add these **repository secrets** (Settings → Secrets and variables → Actions):
 
-| Secret | Description |
-| ------ | ----------- |
-| `AWS_ACCESS_KEY_ID` | IAM user/role with AgentCore deploy + CodeBuild permissions |
-| `AWS_SECRET_ACCESS_KEY` | Matching secret key |
-| `ANTHROPIC_API_KEY` | Agent LLM API key |
-| `DATABASE_URL` | Aurora async URL (`postgresql+psycopg://...?sslmode=require`) |
-| `DATABASE_URL_SYNC` | Aurora sync URL for LangGraph checkpointer |
+| Secret                  | Description                                                   |
+| ----------------------- | ------------------------------------------------------------- |
+| `AWS_ACCESS_KEY_ID`     | IAM user/role with AgentCore deploy + CodeBuild permissions   |
+| `AWS_SECRET_ACCESS_KEY` | Matching secret key                                           |
+| `ANTHROPIC_API_KEY`     | Agent LLM API key                                             |
+| `DATABASE_URL`          | Aurora async URL (`postgresql+psycopg://...?sslmode=require`) |
+| `DATABASE_URL_SYNC`     | Aurora sync URL for LangGraph checkpointer                    |
 
 Non-secret runtime defaults (region, embeddings, log level) are set in the workflow file.
 
@@ -217,8 +217,8 @@ Enable [AgentCore observability](https://docs.aws.amazon.com/bedrock-agentcore/l
 | Catalog not ready           | Run `import-catalog` against Aurora; check `DATABASE_URL` env on runtime                               |
 | Permission denied           | Verify IAM policies for deploy + `bedrock-agentcore:InvokeAgentRuntime`                                |
 | Connection refused (DB)     | Security groups / VPC — runtime must reach Aurora                                                      |
-| SSL / unexpected eof (DB)   | Add `?sslmode=require` to Aurora URLs (auto-applied in `config.py` for `*.rds.amazonaws.com`)        |
-| Runtime env wiped           | Never run bare `agentcore deploy` — always pass `--env` flags (see `deploy-agentcore.sh`)            |
+| SSL / unexpected eof (DB)   | Add `?sslmode=require` to Aurora URLs (auto-applied in `config.py` for `*.rds.amazonaws.com`)          |
+| Runtime env wiped           | Never run bare `agentcore deploy` — always pass `--env` flags (see `deploy-agentcore.sh`)              |
 | Model / embedding errors    | Enable Bedrock model access in console; match `EMBEDDING_DIM` to vectors                               |
 | Package too large (>250 MB) | Re-run export with extra `--prune` flags, or switch to container deploy (toolkit generates Dockerfile) |
 | Port 8080 in use (local)    | Stop other AgentCore local processes                                                                   |
