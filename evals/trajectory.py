@@ -11,12 +11,11 @@ from app.agents.conversation import build_working_query, merge_session_context
 from app.agents.nodes import (
     _heuristic_route,
     _merge_route_results,
-    input_guardrail_node,
     needs_clarification,
+    supervisor_node,
 )
 from app.agents.workers import transactional_tools_node
 from app.agents.tool_router import plan_transactional_tools
-from app.guardrails.input import run_input_guardrails
 from evals.schema import EvalCase
 
 
@@ -76,11 +75,10 @@ def _check_routing_case(case: EvalCase) -> TrajectoryResult:
     message = case.routing_message()
 
     if case.expect_refusal or not case.in_scope:
-        verdict = run_input_guardrails(message)
-        if verdict.in_scope != case.in_scope:
-            result.failures.append(
-                f"expected in_scope={case.in_scope}, got {verdict.in_scope}"
-            )
+        result.failures.append(
+            "refusal cases require live eval with supervisor LLM (skipped offline)"
+        )
+        result.passed = False
         return result
 
     state = _build_state(case, message)
@@ -113,7 +111,10 @@ def _check_routing_case(case: EvalCase) -> TrajectoryResult:
 
 
 def run_routing_suite(cases: list[EvalCase]) -> list[TrajectoryResult]:
-    return [_check_routing_case(case) for case in cases]
+    offline_cases = [
+        case for case in cases if not case.expect_refusal and case.in_scope
+    ]
+    return [_check_routing_case(case) for case in offline_cases]
 
 
 async def _run_graph_case(case: EvalCase, session: Any) -> TrajectoryResult:
@@ -122,22 +123,20 @@ async def _run_graph_case(case: EvalCase, session: Any) -> TrajectoryResult:
     message = case.routing_message()
     state: dict[str, Any] = _build_graph_state(case)
 
-    guard = await input_guardrail_node(state, config)
-    state = {**state, **guard}
+    supervisor = await supervisor_node(state, config)
+    state = {**state, **supervisor}
 
     if case.expect_refusal or not case.in_scope:
-        if not guard.get("refused"):
-            result.failures.append("expected refusal at input guardrail")
+        if not supervisor.get("refused"):
+            result.failures.append("expected refusal from supervisor")
         if result.failures:
             result.passed = False
         return result
 
-    if guard.get("refused"):
-        result.failures.append("unexpected refusal at input guardrail")
+    if supervisor.get("refused"):
+        result.failures.append("unexpected refusal from supervisor")
         result.passed = False
         return result
-
-    state = _apply_heuristic_supervisor_state(state, message)
 
     if case.expect_intent and state.get("intent") != case.expect_intent:
         result.failures.append(

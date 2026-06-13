@@ -45,11 +45,9 @@ async def _execute_worker_tools(
     phase_raw = state.get("transaction_phase") or TransactionPhase.SEARCHING
     machine = TransactionStateMachine(phase_raw)
 
-    tool_results: dict[str, object] = dict(state.get("tool_results") or {})
-    purchase_handoffs: list[dict[str, object]] = list(
-        state.get("purchase_handoffs") or []
-    )
-    allowed: set[str] = set(state.get("allowed_ps_numbers") or [])
+    tool_results: dict[str, object] = {}
+    purchase_handoffs: list[dict[str, object]] = []
+    allowed: set[str] = set()
     identified_part_id = state.get("identified_part_id")
     catalog_grounded = True
 

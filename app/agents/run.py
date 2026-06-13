@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
@@ -9,8 +10,11 @@ from uuid import uuid4
 from langchain_core.messages import HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.checkpointer import get_checkpointer
 from app.agents.graph import get_compiled_graph
 from app.agents.product_cards import select_product_cards
+
+logger = logging.getLogger(__name__)
 
 
 def _yield_result_events(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -50,6 +54,15 @@ async def run_agent_turn(
     """Stream high-level agent events for the chat SSE contract."""
     graph = get_compiled_graph()
     tid = thread_id or str(uuid4())
+    memory_enabled = get_checkpointer() is not None
+    if not memory_enabled:
+        logger.warning(
+            "Conversation memory disabled; prior turns will not load. "
+            "Pass thread_id on every request once memory is enabled."
+        )
+    elif thread_id is None:
+        logger.info("New conversation thread_id=%s", tid)
+
     config = {
         "configurable": {
             "thread_id": tid,
@@ -57,7 +70,11 @@ async def run_agent_turn(
         }
     }
 
-    yield {"type": "session", "thread_id": tid}
+    yield {
+        "type": "session",
+        "thread_id": tid,
+        "conversation_memory": "enabled" if memory_enabled else "disabled",
+    }
     yield {"type": "status", "message": "Starting…"}
 
     result: dict[str, Any] = {}

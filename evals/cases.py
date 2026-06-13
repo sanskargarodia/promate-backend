@@ -25,13 +25,15 @@ SMOKE_CASES: tuple[SmokeCase, ...] = (
     SmokeCase(
         id="compatibility",
         message="Is PS11752778 compatible with WDT780SAEM1?",
-        state={"intent": "compatibility", "ps_number": "PS11752778", "model_number": "WDT780SAEM1"},
+        state={"intent": "compatibility", "ps_number": "PS11752778",
+               "model_number": "WDT780SAEM1"},
         expected_tools=("get_part_details",),
     ),
     SmokeCase(
         id="troubleshooting",
         message="The ice maker on my Whirlpool fridge is not working. How can I fix it?",
-        state={"intent": "troubleshooting", "appliance_type": "refrigerator", "brand": "Whirlpool"},
+        state={"intent": "troubleshooting",
+               "appliance_type": "refrigerator", "brand": "Whirlpool"},
         expected_tools=("search_parts",),
     ),
     SmokeCase(

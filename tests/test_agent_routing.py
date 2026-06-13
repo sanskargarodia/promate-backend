@@ -9,6 +9,16 @@ def test_heuristic_install_intent() -> None:
     assert routed["ps_number"] == "PS11752778"
 
 
+def test_heuristic_install_pronoun_uses_session_ps() -> None:
+    state = {
+        "session_context": {"ps_number": "PS11752778", "active_intent": "product_search"},
+        "identified_part_id": "PS11752778",
+    }
+    routed = _heuristic_route("can you tell about its installation", state)
+    assert routed["intent"] == "installation"
+    assert routed["ps_number"] == "PS11752778"
+
+
 def test_heuristic_compatibility_intent() -> None:
     routed = _heuristic_route(
         "Is PS11752778 compatible with my WDT780SAEM1 model?")
