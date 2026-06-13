@@ -25,7 +25,13 @@ async def init_checkpointer() -> AsyncPostgresSaver:
         row_factory=dict_row,
     )
     _checkpointer = AsyncPostgresSaver(conn=_connection)
-    await _checkpointer.setup()
+    try:
+        await _checkpointer.setup()
+    except Exception as exc:
+        # AgentCore scales workers in parallel; migration insert can race.
+        msg = str(exc)
+        if "checkpoint_migrations_pkey" not in msg and "already exists" not in msg:
+            raise
     return _checkpointer
 
 

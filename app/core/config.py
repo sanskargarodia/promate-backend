@@ -9,8 +9,18 @@ the system from local (Anthropic API + local Postgres/pgvector + fastembed) to c
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Self
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _with_aurora_ssl(url: str) -> str:
+    """Aurora/RDS requires TLS; psycopg needs an explicit sslmode in conninfo."""
+    if "rds.amazonaws.com" not in url or "sslmode=" in url:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}sslmode=require"
 
 
 class Settings(BaseSettings):
@@ -50,6 +60,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://promate:promate@localhost:5433/promate"
     # libpq conninfo for LangGraph PostgresSaver / psycopg pools (postgresql://…).
     database_url_sync: str = "postgresql://promate:promate@localhost:5433/promate"
+
+    @model_validator(mode="after")
+    def ensure_aurora_ssl(self) -> Self:
+        self.database_url = _with_aurora_ssl(self.database_url)
+        self.database_url_sync = _with_aurora_ssl(self.database_url_sync)
+        return self
 
     @property
     def sqlalchemy_sync_database_url(self) -> str:
