@@ -18,6 +18,7 @@ from app.agents.conversation import (
     has_troubleshooting_minimum_context,
     is_vague_troubleshooting,
     merge_session_context,
+    reset_turn_ephemeral_state,
 )
 from app.agents.follow_ups import generate_suggested_follow_ups
 from app.agents.grounding import grounded_ps_numbers, ps_numbers_in_text
@@ -26,7 +27,6 @@ from app.agents.status import NODE_STATUS, SUPPORT_STATUS, emit_status
 from app.agents.tool_router import detect_purchase_intent
 from app.core.config import is_llm_configured
 from app.core.llm import get_chat_model, get_guardrail_model
-from app.guardrails.input import run_input_guardrails
 from app.guardrails.output import validate_output
 from app.guardrails.refusal import RefusalCode, refusal_context, refusal_fallback
 from app.services import catalog as catalog_svc
@@ -39,6 +39,13 @@ _LLM_UNAVAILABLE = (
     "The assistant needs an Anthropic API key to compose answers from catalog data. "
     "Add ANTHROPIC_API_KEY to promate-backend/.env and restart the server."
 )
+
+_VALID_REFUSAL_CODES: frozenset[RefusalCode] = frozenset({
+    "prompt_injection",
+    "unsupported_appliance",
+    "unsupported_topic",
+    "unclear_scope",
+})
 
 
 def _prompt(name: str, **kwargs: str) -> str:
@@ -149,6 +156,19 @@ def _merge_route_results(
     state: AgentState,
 ) -> dict[str, Any]:
     """Combine LLM classification with deterministic extraction."""
+    if llm and llm.get("intent") == "refusal":
+        code = llm.get("refusal_code") or "unclear_scope"
+        if code not in _VALID_REFUSAL_CODES:
+            code = "unclear_scope"
+        return {
+            "intent": "refusal",
+            "refusal_code": code,
+            "ps_number": heuristic.get("ps_number"),
+            "model_number": heuristic.get("model_number"),
+            "appliance_type": heuristic.get("appliance_type"),
+            "brand": heuristic.get("brand"),
+        }
+
     merged = dict(heuristic)
     if not llm:
         return merged
@@ -198,24 +218,6 @@ async def _llm_route(state: AgentState, text: str) -> dict[str, Any] | None:
     return None
 
 
-async def input_guardrail_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
-    _ = config
-    emit_status(NODE_STATUS["input_guardrail"])
-    text = _last_user_text(state)
-    verdict = run_input_guardrails(text)
-    notes = [verdict.reason]
-    if not verdict.in_scope or verdict.injection_detected:
-        payload: dict[str, Any] = {
-            "refused": True,
-            "intent": "refusal",
-            "guardrail_notes": notes,
-        }
-        if verdict.refusal_code:
-            payload["refusal_code"] = verdict.refusal_code
-        return payload
-    return {"refused": False, "guardrail_notes": notes}
-
-
 async def _compose_refusal(user_message: str, code: RefusalCode) -> str:
     if not is_llm_configured():
         return refusal_fallback(code)
@@ -248,6 +250,7 @@ async def refusal_node(state: AgentState, config: RunnableConfig) -> dict[str, A
 async def supervisor_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     _ = config
     emit_status(NODE_STATUS["supervisor"])
+    turn_reset = reset_turn_ephemeral_state()
     text = _last_user_text(state)
     working_query = build_working_query(state)
     heuristic_routed = _heuristic_route(working_query or text, state)
@@ -255,6 +258,18 @@ async def supervisor_node(state: AgentState, config: RunnableConfig) -> dict[str
     routed = _merge_route_results(llm_routed, heuristic_routed, state=state)
 
     intent: Intent = routed.get("intent", "product_search")
+    if intent == "refusal":
+        code = routed.get("refusal_code") or "unclear_scope"
+        if code not in _VALID_REFUSAL_CODES:
+            code = "unclear_scope"
+        return {
+            **turn_reset,
+            "refused": True,
+            "intent": "refusal",
+            "refusal_code": code,
+            "guardrail_notes": ["Supervisor classified message as out of scope."],
+        }
+
     if intent not in {
         "product_search",
         "compatibility",
@@ -281,6 +296,16 @@ async def supervisor_node(state: AgentState, config: RunnableConfig) -> dict[str
         if prior_ps and not ps_number:
             ps_number = prior_ps
 
+    if re.search(r"\b(its?|this|that)\b", lowered) and "install" in lowered:
+        intent = "installation"
+        prior_ps = (
+            (state.get("session_context") or {}).get("ps_number")
+            or state.get("identified_part_id")
+            or state.get("ps_number")
+        )
+        if prior_ps and not ps_number:
+            ps_number = prior_ps
+
     session_context = merge_session_context(
         state,
         intent=intent,
@@ -292,6 +317,8 @@ async def supervisor_node(state: AgentState, config: RunnableConfig) -> dict[str
     )
 
     return {
+        **turn_reset,
+        "refused": False,
         "intent": intent,
         "ps_number": session_context.get("ps_number") or ps_number,
         "model_number": session_context.get("model_number") or model_number,
@@ -420,6 +447,7 @@ async def _invoke_composer(state: AgentState) -> str:
         tool_payload=json.dumps(tool_payload, indent=2),
         user_message=text,
         conversation_history=format_recent_transcript(state),
+        session_context=format_session_context(state),
     )
     resp = await get_chat_model(streaming=False).ainvoke(prompt)
     return resp.content if isinstance(resp.content, str) else str(resp.content)

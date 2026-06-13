@@ -222,6 +222,22 @@ def _extract_symptom(text: str, intent: Intent | None) -> str | None:
     return None
 
 
+def reset_turn_ephemeral_state() -> dict[str, object]:
+    """Clear per-turn tool/output fields while checkpointed memory persists."""
+    return {
+        "tool_results": {},
+        "tool_payload": {},
+        "final_response": "",
+        "suggested_follow_ups": [],
+        "purchase_handoffs": [],
+        "allowed_ps_numbers": [],
+        "catalog_grounded": True,
+        "guardrail_notes": [],
+        "refused": False,
+        "refusal_code": None,
+    }
+
+
 def is_vague_troubleshooting(state: AgentState) -> bool:
     """True when troubleshooting still lacks appliance or a searchable symptom."""
     ctx = get_session_context(state)

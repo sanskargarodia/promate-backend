@@ -1,7 +1,7 @@
 """Eval package entrypoint.
 
 Usage:
-  uv run python -m evals              # smoke (routing + guardrails, no API key)
+  uv run python -m evals              # smoke (tool routing, no API key)
   uv run python -m evals trajectory   # full dataset routing trajectory
   uv run python -m evals trajectory --graph  # + DB graph tool execution
   uv run python -m evals live --canonical    # live E2E (API key + DB)

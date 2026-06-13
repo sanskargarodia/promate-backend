@@ -13,7 +13,8 @@ from app.agents.tool_router import plan_transactional_tools
 
 _compiled_graph = None
 
-WorkerRoute = Literal[
+SupervisorRoute = Literal[
+    "refusal",
     "clarification",
     "product_search_worker",
     "compatibility_worker",
@@ -24,13 +25,10 @@ WorkerRoute = Literal[
 ]
 
 
-def _route_after_input(state: AgentState) -> Literal["refusal", "supervisor"]:
-    if state.get("refused"):
+def _route_after_supervisor(state: AgentState) -> SupervisorRoute:
+    if state.get("intent") == "refusal" or state.get("refused"):
         return "refusal"
-    return "supervisor"
 
-
-def _route_after_supervisor(state: AgentState) -> WorkerRoute:
     if nodes.needs_clarification(state):
         return "clarification"
 
@@ -39,7 +37,7 @@ def _route_after_supervisor(state: AgentState) -> WorkerRoute:
         return "order_status_worker"
 
     intent = state.get("intent") or "product_search"
-    by_intent: dict[str, WorkerRoute] = {
+    by_intent: dict[str, SupervisorRoute] = {
         "product_search": "product_search_worker",
         "compatibility": "compatibility_worker",
         "installation": "installation_worker",
@@ -52,7 +50,6 @@ def _route_after_supervisor(state: AgentState) -> WorkerRoute:
 def build_graph(*, checkpointer: BaseCheckpointSaver | None = None):
     graph = StateGraph(AgentState)
 
-    graph.add_node("input_guardrail", nodes.input_guardrail_node)
     graph.add_node("refusal", nodes.refusal_node)
     graph.add_node("supervisor", nodes.supervisor_node)
     graph.add_node("clarification", nodes.clarification_node)
@@ -67,8 +64,7 @@ def build_graph(*, checkpointer: BaseCheckpointSaver | None = None):
     graph.add_node("output_guardrail", nodes.output_guardrail_node)
     graph.add_node("suggest_follow_ups", nodes.suggest_follow_ups_node)
 
-    graph.add_edge(START, "input_guardrail")
-    graph.add_conditional_edges("input_guardrail", _route_after_input)
+    graph.add_edge(START, "supervisor")
     graph.add_conditional_edges("supervisor", _route_after_supervisor)
     graph.add_edge("refusal", "suggest_follow_ups")
     graph.add_edge("clarification", "suggest_follow_ups")

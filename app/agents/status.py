@@ -6,7 +6,6 @@ from langgraph.config import get_stream_writer
 
 # Node-level defaults (shown when a graph step begins).
 NODE_STATUS: dict[str, str] = {
-    "input_guardrail": "Reviewing your question…",
     "supervisor": "Understanding your request…",
     "refusal": "Preparing response…",
     "clarification": "Preparing response…",

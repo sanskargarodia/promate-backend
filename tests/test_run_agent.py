@@ -24,12 +24,17 @@ async def test_run_agent_turn_streams_status_events(monkeypatch: pytest.MonkeyPa
     graph = MagicMock()
     graph.astream = fake_astream
     monkeypatch.setattr("app.agents.run.get_compiled_graph", lambda: graph)
+    monkeypatch.setattr("app.agents.run.get_checkpointer", lambda: None)
 
     events: list[dict[str, Any]] = []
     async for event in run_agent_turn(message="ice maker", session=MagicMock(), thread_id="t-1"):
         events.append(event)
 
-    assert events[0] == {"type": "session", "thread_id": "t-1"}
+    assert events[0] == {
+        "type": "session",
+        "thread_id": "t-1",
+        "conversation_memory": "disabled",
+    }
     assert events[1] == {"type": "status", "message": "Starting…"}
     assert {"type": "status", "message": "Searching the parts catalog…"} in events
     assert events[-2] == {"type": "token", "content": "Found PS11752778."}
